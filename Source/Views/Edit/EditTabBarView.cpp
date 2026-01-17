@@ -284,7 +284,9 @@ void EditTabBarView::captureLastBars() {
 
     const auto position = edit.getTransport().getPosition();
     const auto &timeSig = edit.tempoSequence.getTimeSigAt(position);
-    const double beatsPerBar = timeSig.numerator.get();
+    const int denominator = juce::jmax(1, timeSig.denominator.get());
+    const double beatsPerBar =
+        timeSig.numerator.get() * (4.0 / static_cast<double>(denominator));
     auto endBeats = edit.tempoSequence.toBeats(position).inBeats();
     auto barEndBeats = std::floor(endBeats / beatsPerBar) * beatsPerBar;
     auto barEnd = edit.tempoSequence.toTime(
