@@ -10,7 +10,41 @@
 #include "TracksView.h"
 #include <cmath>
 #include <memory>
-#include <thread>
+
+class CaptureWriteJob : public juce::ThreadPoolJob {
+  public:
+    CaptureWriteJob(juce::Component::SafePointer<EditTabBarView> view,
+                    std::shared_ptr<juce::AudioBuffer<float>> bufferIn,
+                    juce::File fileIn, tracktion::TimeRange rangeIn,
+                    app_services::CaptureLastService *serviceIn)
+        : juce::ThreadPoolJob("CaptureWriteJob"), viewTarget(view),
+          buffer(std::move(bufferIn)), captureFile(std::move(fileIn)),
+          range(rangeIn), service(serviceIn) {}
+
+    JobStatus runJob() override {
+        const bool ok = service != nullptr &&
+                        service->writeBufferToFile(*buffer, captureFile);
+        auto viewCopy = viewTarget;
+        auto captureFileCopy = captureFile;
+        auto rangeCopy = range;
+        juce::MessageManager::callAsync(
+            [viewCopy, ok, captureFileCopy, rangeCopy]() mutable {
+                if (viewCopy == nullptr)
+                    return;
+                viewCopy->handleCaptureWriteComplete(ok, captureFileCopy,
+                                                     rangeCopy);
+            });
+        return jobHasFinished;
+    }
+
+  private:
+    juce::Component::SafePointer<EditTabBarView> viewTarget;
+    std::shared_ptr<juce::AudioBuffer<float>> buffer;
+    juce::File captureFile;
+    tracktion::TimeRange range;
+    app_services::CaptureLastService *service = nullptr;
+};
+
 EditTabBarView::EditTabBarView(tracktion::Edit &e,
                                app_services::MidiCommandManager &mcm)
     : TabbedComponent(juce::TabbedButtonBar::Orientation::TabsAtTop), edit(e),
@@ -358,21 +392,10 @@ void EditTabBarView::captureLastBars() {
     messageBox.setVisible(true);
 
     juce::Component::SafePointer<EditTabBarView> safeThis(this);
-    auto captureFileCopy = captureFile;
-    auto rangeCopy = range;
-    std::thread([safeThis, captureBuffer, captureFileCopy, rangeCopy,
-                 captureService]() {
-        const bool ok = captureService != nullptr &&
-                        captureService->writeBufferToFile(*captureBuffer,
-                                                          captureFileCopy);
-        juce::MessageManager::callAsync(
-            [safeThis, ok, captureFileCopy, rangeCopy]() {
-                if (safeThis == nullptr)
-                    return;
-                safeThis->handleCaptureWriteComplete(ok, captureFileCopy,
-                                                     rangeCopy);
-            });
-    }).detach();
+    captureThreadPool.addJob(
+        new CaptureWriteJob(safeThis, captureBuffer, captureFile, range,
+                            captureService),
+        true);
 }
 
 void EditTabBarView::handleCaptureWriteComplete(

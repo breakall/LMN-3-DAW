@@ -8,6 +8,8 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+class CaptureWriteJob;
+
 class EditTabBarView : public juce::TabbedComponent,
                        public app_services::MidiCommandManager::Listener,
                        public app_view_models::ItemListState::Listener,
@@ -62,6 +64,7 @@ class EditTabBarView : public juce::TabbedComponent,
     juce::Label captureStatusLabel;
     int captureBars = 4;
     std::atomic<bool> captureInProgress{false};
+    juce::ThreadPool captureThreadPool{1};
 
     void timerCallback() override;
     void resetTrackRelatedTabs();
@@ -69,6 +72,7 @@ class EditTabBarView : public juce::TabbedComponent,
     void handleCaptureWriteComplete(bool ok, const juce::File &captureFile,
                                     const tracktion::TimeRange &range);
     void updateCaptureStatusLabel();
+    friend class CaptureWriteJob;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EditTabBarView)
 };

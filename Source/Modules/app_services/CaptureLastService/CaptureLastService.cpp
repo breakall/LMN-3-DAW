@@ -102,7 +102,6 @@ bool CaptureLastService::captureToBuffer(const tracktion::TimeRange &range,
         return false;
 
     buffer.setSize(configuredChannels, numSamples);
-    buffer.clear();
 
     int startSample = writePosition.load() - numSamples;
     if (startSample < 0)
