@@ -3,11 +3,21 @@ set -euo pipefail
 
 # =========================
 # LMN-3 Audio Setup (Bullseye)
-# Raspberry Pi 4 "firmware-ish" audio configuration:
+# Raspberry Pi 4 deterministic audio configuration:
 #   ALSA -> JACK -> LMN-3
 #
-# Scope: audio only (no display, Wi-Fi, Bluetooth, CPU governor, etc.)
-# Safe to re-run.
+# Scope: audio only.
+#
+# Interactive behavior:
+# - Enumerates ALSA playback devices
+# - Presents a numbered list
+# - Prompts you to choose one
+# - Uses the selection for:
+#     * /etc/asound.conf (predictable ALSA tests)
+#     * systemd jackd.service (opens selected device)
+#
+# Non-interactive behavior:
+# - Set AUDIO_CARD_DEVICE="CARD,DEVICE" (e.g. "1,0") to skip prompting.
 # =========================
 
 log() { printf "\n[LMN3-AUDIO] %s\n" "$*"; }
@@ -23,8 +33,8 @@ need_root() {
 # --------------------------
 # Config (override via env)
 # --------------------------
-# ALSA device JACK will open directly (examples: hw:0, hw:1, hw:USB)
-AUDIO_DEV="${AUDIO_DEV:-hw:0}"
+# If set, skips interactive prompt. Format: "CARD,DEVICE" e.g. "1,0"
+AUDIO_CARD_DEVICE="${AUDIO_CARD_DEVICE:-}"
 
 # JACK params (stable defaults for Pi 4)
 JACK_RATE="${JACK_RATE:-48000}"
@@ -118,29 +128,133 @@ configure_realtime_limits() {
 EOF
 }
 
-configure_alsa_for_testing_only() {
-  log "Creating minimal /etc/asound.conf for consistent ALSA tests"
+validate_card_device_format() {
+  local v="$1"
+  [[ "$v" =~ ^[0-9]+,[0-9]+$ ]] || die "Value must look like 'CARD,DEVICE' e.g. '1,0' (got: '$v')"
+}
 
-  # NOTE:
-  # - JACK will open AUDIO_DEV directly. This file mainly makes `aplay` predictable.
-  # - We avoid dmix here because it can fight with JACK for device access.
+# Build a numbered list of playback devices using /proc/asound (more parseable than aplay -l output)
+# Produces lines like:
+#   idx|card|device|card_name|pcm_name
+enumerate_playback_devices() {
+  local idx=0
+  local card_dir card_num card_name pcm_dir dev_num pcm_info pcm_name
+
+  # /proc/asound/cardX directories
+  for card_dir in /proc/asound/card[0-9]*; do
+    [[ -d "${card_dir}" ]] || continue
+    card_num="$(basename "${card_dir}" | sed 's/^card//')"
+    card_name="$(tr -d '\0' < "${card_dir}/id" 2>/dev/null || echo "card${card_num}")"
+
+    # /proc/asound/cardX/pcmYp directories (playback)
+    for pcm_dir in "${card_dir}"/pcm*p; do
+      [[ -d "${pcm_dir}" ]] || continue
+      dev_num="$(basename "${pcm_dir}" | sed -E 's/^pcm([0-9]+)p$/\1/')"
+
+      pcm_info="${pcm_dir}/info"
+      if [[ -f "${pcm_info}" ]]; then
+        # Prefer "name:" line if present
+        pcm_name="$(grep -E '^name:' "${pcm_info}" | head -n 1 | sed 's/^name:[[:space:]]*//' || true)"
+        [[ -n "${pcm_name}" ]] || pcm_name="$(grep -E '^stream:' "${pcm_info}" | head -n 1 | sed 's/^stream:[[:space:]]*//' || true)"
+      else
+        pcm_name="playback"
+      fi
+
+      printf "%d|%s|%s|%s|%s\n" "${idx}" "${card_num}" "${dev_num}" "${card_name}" "${pcm_name}"
+      idx=$((idx+1))
+    done
+  done
+}
+
+present_device_menu_and_choose() {
+  if [[ -n "${AUDIO_CARD_DEVICE}" ]]; then
+    validate_card_device_format "${AUDIO_CARD_DEVICE}"
+    return 0
+  fi
+
+  log "Enumerating ALSA playback devices..."
+  local devices
+  devices="$(enumerate_playback_devices || true)"
+
+  if [[ -z "${devices}" ]]; then
+    log "aplay -l output for debugging:"
+    aplay -l || true
+    die "No ALSA playback devices found under /proc/asound. Check drivers/hardware."
+  fi
+
+  echo
+  echo "Available playback devices:"
+  echo "--------------------------"
+
+  # Print menu
+  while IFS='|' read -r idx card dev card_name pcm_name; do
+    printf "  [%s] hw:%s,%s  (%s)  - %s\n" "${idx}" "${card}" "${dev}" "${card_name}" "${pcm_name}"
+  done <<< "${devices}"
+
+  echo
+  echo "Choose a device by number. (Example: if you previously heard audio on hw:1,0, pick that.)"
+  echo
+
+  local choice max_idx
+  max_idx="$(echo "${devices}" | awk -F'|' 'END{print $1}')"
+
+  while true; do
+    read -r -p "Enter selection [0-${max_idx}]: " choice
+    [[ "${choice}" =~ ^[0-9]+$ ]] || { echo "Not a number."; continue; }
+    (( choice >= 0 && choice <= max_idx )) || { echo "Out of range."; continue; }
+
+    # Map selection -> card,device
+    local selected
+    selected="$(echo "${devices}" | awk -F'|' -v c="${choice}" '$1==c{print $2","$3; exit}')"
+    [[ -n "${selected}" ]] || { echo "Selection not found."; continue; }
+
+    AUDIO_CARD_DEVICE="${selected}"
+    validate_card_device_format "${AUDIO_CARD_DEVICE}"
+
+    echo
+    echo "Selected: hw:${AUDIO_CARD_DEVICE}"
+    echo
+    break
+  done
+}
+
+test_selected_device() {
+  local test_cmd
+  test_cmd="aplay -D hw:${AUDIO_CARD_DEVICE} /usr/share/sounds/alsa/Front_Center.wav"
+
+  echo "Testing selected device with:"
+  echo "  ${test_cmd}"
+  echo "(You should hear 'Front Center'.)"
+  echo
+
+  if ! ${test_cmd}; then
+    warn "Test playback failed. Mixer could be muted or device isn't connected."
+    warn "Try: alsamixer (F6 to select the card) and unmute PCM/Master."
+  fi
+}
+
+configure_alsa_for_testing_only() {
+  local audio_hw="hw:${AUDIO_CARD_DEVICE}"
+  log "Creating minimal /etc/asound.conf (default -> ${audio_hw})"
+
   if [[ -f /etc/asound.conf ]]; then
     cp -n /etc/asound.conf /etc/asound.conf.lmn3.bak || true
     log "Backed up /etc/asound.conf to /etc/asound.conf.lmn3.bak"
   fi
 
   local ctl_card="0"
-  if [[ "${AUDIO_DEV}" =~ ^hw:([^,]+) ]]; then
+  if [[ "${AUDIO_CARD_DEVICE}" =~ ^([0-9]+),[0-9]+$ ]]; then
     ctl_card="${BASH_REMATCH[1]}"
   fi
 
   cat >/etc/asound.conf <<EOF
 pcm.!default {
   type plug
-  slave.pcm "${AUDIO_DEV}"
+  slave.pcm "${audio_hw}"
   slave.rate ${JACK_RATE}
 }
 
+# Control interface is mostly irrelevant for JACK; kept generic to avoid tool failures.
 ctl.!default {
   type hw
   card ${ctl_card}
@@ -151,7 +265,9 @@ EOF
 }
 
 create_jack_service() {
-  log "Creating systemd service: jackd"
+  local audio_hw="hw:${AUDIO_CARD_DEVICE}"
+
+  log "Creating systemd service: jackd (device ${audio_hw})"
 
   install -d -m 0755 /var/log/lmn3
   chown "${AUDIO_USER}:audio" /var/log/lmn3 || true
@@ -170,7 +286,7 @@ LimitRTPRIO=infinity
 LimitMEMLOCK=infinity
 Nice=-10
 Environment=JACK_NO_AUDIO_RESERVATION=1
-ExecStart=/usr/bin/jackd -P${JACK_RT_PRIO} -dalsa -d${AUDIO_DEV} -r${JACK_RATE} -p${JACK_PERIOD} -n${JACK_NPERIODS}
+ExecStart=/usr/bin/jackd -P${JACK_RT_PRIO} -dalsa -d${audio_hw} -r${JACK_RATE} -p${JACK_PERIOD} -n${JACK_NPERIODS}
 Restart=always
 RestartSec=1
 StandardOutput=append:/var/log/lmn3/jackd.log
@@ -216,13 +332,16 @@ EOF
 }
 
 final_notes() {
-  log "Done. Suggested verification commands:"
-  echo "  aplay -l"
+  log "Selected device: hw:${AUDIO_CARD_DEVICE}"
+  log "Verification commands:"
   echo "  aplay /usr/share/sounds/alsa/Front_Center.wav"
   echo "  systemctl start jackd && systemctl status jackd --no-pager"
   echo "  tail -n 80 /var/log/lmn3/jackd.log"
   echo "  systemctl start lmn3 && systemctl status lmn3 --no-pager"
   echo "  sudo reboot   (recommended once everything looks good)"
+  echo
+  echo "Non-interactive usage:"
+  echo "  sudo AUDIO_CARD_DEVICE=${AUDIO_CARD_DEVICE} LMN3_CMD=${LMN3_CMD} $0"
 }
 
 main() {
@@ -234,6 +353,10 @@ main() {
   install_packages
   disable_or_purge_pulseaudio
   configure_realtime_limits
+
+  present_device_menu_and_choose
+  test_selected_device
+
   configure_alsa_for_testing_only
   create_jack_service
   create_lmn3_service
