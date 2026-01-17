@@ -48,6 +48,16 @@ EditTabBarView::EditTabBarView(tracktion::Edit &e,
     addChildComponent(messageBox);
     messageBox.setAlwaysOnTop(true);
 
+    addChildComponent(captureStatusLabel);
+    captureStatusLabel.setAlwaysOnTop(true);
+    captureStatusLabel.setJustificationType(juce::Justification::centredLeft);
+    captureStatusLabel.setInterceptsMouseClicks(false, false);
+    captureStatusLabel.setFont(messageBox.getFont());
+    captureStatusLabel.setColour(juce::Label::textColourId,
+                                 juce::Colours::white);
+    captureStatusLabel.setVisible(true);
+    updateCaptureStatusLabel();
+
     midiCommandManager.addListener(this);
     viewModel.addListener(this);
 
@@ -89,6 +99,11 @@ void EditTabBarView::resized() {
     messageBox.setBounds((getWidth() - messageBoxWidth) / 2,
                          (getHeight() - messageBoxHeight) / 2, messageBoxWidth,
                          messageBoxHeight);
+
+    int padding = juce::jmax(6, getWidth() / 40);
+    int labelHeight = juce::jmax(18, getHeight() / 16);
+    captureStatusLabel.setBounds(padding, padding, getWidth() / 2,
+                                 labelHeight);
 }
 
 void EditTabBarView::tracksButtonReleased() {
@@ -219,6 +234,7 @@ void EditTabBarView::plusButtonPressed() {
     if (captureBars < 8)
         captureBars *= 2;
 
+    updateCaptureStatusLabel();
     messageBox.setMessage("Capture bars: " + juce::String(captureBars));
     resized();
     messageBox.setVisible(true);
@@ -232,6 +248,7 @@ void EditTabBarView::minusButtonPressed() {
     if (captureBars > 1)
         captureBars /= 2;
 
+    updateCaptureStatusLabel();
     messageBox.setMessage("Capture bars: " + juce::String(captureBars));
     resized();
     messageBox.setVisible(true);
@@ -335,6 +352,7 @@ void EditTabBarView::captureLastBars() {
     }
 
     captureInProgress.store(true);
+    updateCaptureStatusLabel();
     messageBox.setMessage("Capturing...");
     resized();
     messageBox.setVisible(true);
@@ -361,6 +379,7 @@ void EditTabBarView::handleCaptureWriteComplete(
     bool ok, const juce::File &captureFile,
     const tracktion::TimeRange &range) {
     captureInProgress.store(false);
+    updateCaptureStatusLabel();
 
     if (!ok) {
         messageBox.setMessage("Capture failed");
@@ -391,6 +410,15 @@ void EditTabBarView::handleCaptureWriteComplete(
     resized();
     messageBox.setVisible(true);
     startTimer(1000);
+}
+
+void EditTabBarView::updateCaptureStatusLabel() {
+    juce::String status =
+        "Capture: " + juce::String(captureBars) + " bars (Ctrl+Save)";
+    if (captureInProgress.load())
+        status += " writing...";
+
+    captureStatusLabel.setText(status, juce::dontSendNotification);
 }
 
 void EditTabBarView::pluginsButtonReleased() {

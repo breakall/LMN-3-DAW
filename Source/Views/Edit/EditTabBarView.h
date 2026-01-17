@@ -59,6 +59,7 @@ class EditTabBarView : public juce::TabbedComponent,
 
     OctaveDisplayComponent octaveDisplayComponent;
     MessageBox messageBox;
+    juce::Label captureStatusLabel;
     int captureBars = 4;
     std::atomic<bool> captureInProgress{false};
 
@@ -67,6 +68,7 @@ class EditTabBarView : public juce::TabbedComponent,
     void captureLastBars();
     void handleCaptureWriteComplete(bool ok, const juce::File &captureFile,
                                     const tracktion::TimeRange &range);
+    void updateCaptureStatusLabel();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EditTabBarView)
 };
