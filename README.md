@@ -47,6 +47,9 @@ The first time you run the application, the directories `~/.config/LMN-3/samples
 `~/.config/LMN-3/drum kits` will be automatically created. See the sections below for details on how to add
 synth samples and drum kits to the application.
 
+## Raspberry Pi Audio Setup
+This repo includes `lmn3-audio-setup-bullseye.sh`, a repeatable bootstrap script for configuring a Raspberry Pi 4 running Raspberry Pi OS 11 (Bullseye) as a stable LMN-3 audio appliance. The script keeps scope strictly to audio: it disables (and optionally purges) PulseAudio, installs/configures ALSA + JACK, and creates systemd services for jackd and LMN-3 so the stack is deterministic and restartable. Run it on a fresh Bullseye install with environment overrides for your ALSA device (e.g. `AUDIO_DEV=hw:1`) and your LMN-3 launch command (`LMN3_CMD=...`), then reboot and verify with `aplay` and `systemctl status jackd`/`lmn3`.
+
 ### Samples
 Place any audio sample files you wish to use with the Sampler plugin in `~/.config/LMN-3/samples`.
 
