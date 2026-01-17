@@ -389,22 +389,28 @@ void EditTabBarView::handleCaptureWriteComplete(
         return;
     }
 
-    auto audioTracks = tracktion::getAudioTracks(edit);
-    if (audioTracks.size() == 0) {
-        edit.ensureNumberOfAudioTracks(1);
-        audioTracks = tracktion::getAudioTracks(edit);
+    auto track =
+        edit.insertNewAudioTrack(tracktion::TrackInsertPoint::getEndOfTracks(
+                                     edit),
+                                 nullptr);
+    if (track == nullptr) {
+        messageBox.setMessage("No audio track");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
     }
 
-    if (auto *track = audioTracks.getFirst()) {
-        tracktion::ClipPosition clipPosition{range};
-        auto clip =
-            track->insertWaveClip("capture", captureFile, clipPosition, false);
-        if (clip != nullptr)
-            messageBox.setMessage("Capture complete");
-        else
-            messageBox.setMessage("Capture clip failed");
+    tracktion::ClipPosition clipPosition{range};
+    auto clip =
+        track->insertWaveClip("capture", captureFile, clipPosition, false);
+    if (clip != nullptr) {
+        auto &transport = edit.getTransport();
+        transport.setLoopRange(clip->getEditTimeRange());
+        transport.looping = true;
+        messageBox.setMessage("Capture complete");
     } else {
-        messageBox.setMessage("No audio track");
+        messageBox.setMessage("Capture clip failed");
     }
 
     resized();
