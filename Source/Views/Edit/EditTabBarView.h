@@ -4,6 +4,7 @@
 #include <app_navigation/app_navigation.h>
 #include <app_services/app_services.h>
 #include <app_view_models/app_view_models.h>
+#include <atomic>
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <tracktion_engine/tracktion_engine.h>
 
@@ -59,10 +60,13 @@ class EditTabBarView : public juce::TabbedComponent,
     OctaveDisplayComponent octaveDisplayComponent;
     MessageBox messageBox;
     int captureBars = 4;
+    std::atomic<bool> captureInProgress{false};
 
     void timerCallback() override;
     void resetTrackRelatedTabs();
     void captureLastBars();
+    void handleCaptureWriteComplete(bool ok, const juce::File &captureFile,
+                                    const tracktion::TimeRange &range);
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EditTabBarView)
 };

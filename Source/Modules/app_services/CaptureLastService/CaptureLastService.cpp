@@ -29,6 +29,10 @@ int CaptureLastService::getCaptureBars() const { return captureBars; }
 
 bool CaptureLastService::isReady() const { return totalSamples > 0; }
 
+double CaptureLastService::getSampleRate() const { return currentSampleRate; }
+
+int CaptureLastService::getNumChannels() const { return configuredChannels; }
+
 void CaptureLastService::updateBufferSize() {
     if (currentSampleRate <= 0.0 || configuredChannels <= 0)
         return;
@@ -83,8 +87,8 @@ void CaptureLastService::pushOutputBlock(const float **channels,
     writePosition.store(writePos);
 }
 
-bool CaptureLastService::captureToFile(const tracktion::TimeRange &range,
-                                      const juce::File &outputFile) {
+bool CaptureLastService::captureToBuffer(const tracktion::TimeRange &range,
+                                        juce::AudioBuffer<float> &buffer) {
     if (!isReady())
         return false;
 
@@ -97,8 +101,8 @@ bool CaptureLastService::captureToFile(const tracktion::TimeRange &range,
     if (numSamples <= 0 || numSamples > totalSamples)
         return false;
 
-    juce::AudioBuffer<float> captureBuffer(configuredChannels, numSamples);
-    captureBuffer.clear();
+    buffer.setSize(configuredChannels, numSamples);
+    buffer.clear();
 
     int startSample = writePosition.load() - numSamples;
     if (startSample < 0)
@@ -108,10 +112,28 @@ bool CaptureLastService::captureToFile(const tracktion::TimeRange &range,
     const int secondPart = numSamples - firstPart;
 
     for (int ch = 0; ch < configuredChannels; ++ch) {
-        captureBuffer.copyFrom(ch, 0, ringBuffer, ch, startSample, firstPart);
+        buffer.copyFrom(ch, 0, ringBuffer, ch, startSample, firstPart);
         if (secondPart > 0)
-            captureBuffer.copyFrom(ch, firstPart, ringBuffer, ch, 0, secondPart);
+            buffer.copyFrom(ch, firstPart, ringBuffer, ch, 0, secondPart);
     }
+
+    return true;
+}
+
+bool CaptureLastService::captureToFile(const tracktion::TimeRange &range,
+                                      const juce::File &outputFile) {
+    juce::AudioBuffer<float> captureBuffer;
+    if (!captureToBuffer(range, captureBuffer))
+        return false;
+
+    return writeBufferToFile(captureBuffer, outputFile);
+}
+
+bool CaptureLastService::writeBufferToFile(
+    const juce::AudioBuffer<float> &buffer,
+    const juce::File &outputFile) const {
+    if (currentSampleRate <= 0.0 || buffer.getNumSamples() <= 0)
+        return false;
 
     juce::WavAudioFormat wavFormat;
     std::unique_ptr<juce::FileOutputStream> outputStream(
@@ -121,12 +143,13 @@ bool CaptureLastService::captureToFile(const tracktion::TimeRange &range,
 
     std::unique_ptr<juce::AudioFormatWriter> writer(
         wavFormat.createWriterFor(outputStream.get(), currentSampleRate,
-                                  configuredChannels, 24, {}, 0));
+                                  buffer.getNumChannels(), 24, {}, 0));
     if (!writer)
         return false;
 
     outputStream.release();
-    return writer->writeFromAudioSampleBuffer(captureBuffer, 0, numSamples);
+    return writer->writeFromAudioSampleBuffer(buffer, 0,
+                                              buffer.getNumSamples());
 }
 
 } // namespace app_services

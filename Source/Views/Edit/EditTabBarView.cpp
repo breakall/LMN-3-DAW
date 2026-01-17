@@ -9,6 +9,8 @@
 #include "TrackPluginsListView.h"
 #include "TracksView.h"
 #include <cmath>
+#include <memory>
+#include <thread>
 EditTabBarView::EditTabBarView(tracktion::Edit &e,
                                app_services::MidiCommandManager &mcm)
     : TabbedComponent(juce::TabbedButtonBar::Orientation::TabsAtTop), edit(e),
@@ -282,6 +284,14 @@ void EditTabBarView::captureLastBars() {
         return;
     }
 
+    if (captureInProgress.load()) {
+        messageBox.setMessage("Capture busy");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
+    }
+
     const auto position = edit.getTransport().getPosition();
     const auto &timeSig = edit.tempoSequence.getTimeSigAt(position);
     const int denominator = juce::jmax(1, timeSig.denominator.get());
@@ -315,7 +325,44 @@ void EditTabBarView::captureLastBars() {
         captureDir.getNonexistentChildFile("capture", ".wav");
 
     tracktion::TimeRange range(barStart, barEnd);
-    if (!captureService->captureToFile(range, captureFile)) {
+    auto captureBuffer = std::make_shared<juce::AudioBuffer<float>>();
+    if (!captureService->captureToBuffer(range, *captureBuffer)) {
+        messageBox.setMessage("Capture failed");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
+    }
+
+    captureInProgress.store(true);
+    messageBox.setMessage("Capturing...");
+    resized();
+    messageBox.setVisible(true);
+
+    juce::Component::SafePointer<EditTabBarView> safeThis(this);
+    auto captureFileCopy = captureFile;
+    auto rangeCopy = range;
+    std::thread([safeThis, captureBuffer, captureFileCopy, rangeCopy,
+                 captureService]() {
+        const bool ok = captureService != nullptr &&
+                        captureService->writeBufferToFile(*captureBuffer,
+                                                          captureFileCopy);
+        juce::MessageManager::callAsync(
+            [safeThis, ok, captureFileCopy, rangeCopy]() {
+                if (safeThis == nullptr)
+                    return;
+                safeThis->handleCaptureWriteComplete(ok, captureFileCopy,
+                                                     rangeCopy);
+            });
+    }).detach();
+}
+
+void EditTabBarView::handleCaptureWriteComplete(
+    bool ok, const juce::File &captureFile,
+    const tracktion::TimeRange &range) {
+    captureInProgress.store(false);
+
+    if (!ok) {
         messageBox.setMessage("Capture failed");
         resized();
         messageBox.setVisible(true);

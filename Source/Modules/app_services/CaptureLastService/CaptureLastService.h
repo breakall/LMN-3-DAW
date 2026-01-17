@@ -20,10 +20,19 @@ class CaptureLastService {
     void pushOutputBlock(const float **channels, int numChannels,
                          int numSamples);
 
+    bool captureToBuffer(const tracktion::TimeRange &range,
+                         juce::AudioBuffer<float> &buffer);
+
     bool captureToFile(const tracktion::TimeRange &range,
                        const juce::File &outputFile);
 
+    bool writeBufferToFile(const juce::AudioBuffer<float> &buffer,
+                           const juce::File &outputFile) const;
+
     bool isReady() const;
+
+    double getSampleRate() const;
+    int getNumChannels() const;
 
   private:
     void updateBufferSize();
