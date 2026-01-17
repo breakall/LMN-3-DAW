@@ -3,3 +3,4 @@
 
 #include "DrumSamplerPlugin/DrumSamplerPlugin.cpp"
 #include "DistortionPlugin/DistortionPlugin.cpp"
+#include "CaptureTapPlugin/CaptureTapPlugin.cpp"

@@ -8,6 +8,7 @@
 #include "TrackModifiersListView.h"
 #include "TrackPluginsListView.h"
 #include "TracksView.h"
+#include <cmath>
 EditTabBarView::EditTabBarView(tracktion::Edit &e,
                                app_services::MidiCommandManager &mcm)
     : TabbedComponent(juce::TabbedButtonBar::Orientation::TabsAtTop), edit(e),
@@ -175,31 +176,64 @@ void EditTabBarView::saveButtonReleased() {
 
 void EditTabBarView::renderButtonReleased() {
     if (isShowing()) {
-        juce::Logger::writeToLog("Rendering edit ...");
-        auto userAppDataDirectory = juce::File::getSpecialLocation(
-            juce::File::userApplicationDataDirectory);
+        if (edit.getTransport().isPlaying()) {
+            captureLastBars();
+        } else {
+            juce::Logger::writeToLog("Rendering edit ...");
+            auto userAppDataDirectory = juce::File::getSpecialLocation(
+                juce::File::userApplicationDataDirectory);
 
-        auto renderFileName = std::to_string(juce::Time::currentTimeMillis());
+            auto renderFileName =
+                std::to_string(juce::Time::currentTimeMillis());
 
-        auto renderFile = userAppDataDirectory.getChildFile(applicationName)
-                              .getChildFile("renders")
-                              .getNonexistentChildFile(renderFileName, ".wav");
+            auto renderFile =
+                userAppDataDirectory.getChildFile(applicationName)
+                    .getChildFile("renders")
+                    .getNonexistentChildFile(renderFileName, ".wav");
 
-        auto timeRange = tracktion::TimeRange(
-            tracktion::TimePosition::fromSeconds(0.0), edit.getLength());
-        juce::BigInteger tracksToDo{0};
-        for (auto i = 0; i < tracktion::getAllTracks(edit).size(); i++)
-            tracksToDo.setBit(i);
+            auto timeRange = tracktion::TimeRange(
+                tracktion::TimePosition::fromSeconds(0.0), edit.getLength());
+            juce::BigInteger tracksToDo{0};
+            for (auto i = 0; i < tracktion::getAllTracks(edit).size(); i++)
+                tracksToDo.setBit(i);
 
-        tracktion::Renderer::renderToFile("Render", renderFile, edit, timeRange,
-                                          tracksToDo, true, true, {}, true);
-        juce::Logger::writeToLog("Render complete!");
-        messageBox.setMessage("Render Complete!");
-        // must call resized so message box width is updated to fit text
-        resized();
-        messageBox.setVisible(true);
-        startTimer(1000);
+            tracktion::Renderer::renderToFile(
+                "Render", renderFile, edit, timeRange, tracksToDo, true, true,
+                {}, true);
+            juce::Logger::writeToLog("Render complete!");
+            messageBox.setMessage("Render Complete!");
+            // must call resized so message box width is updated to fit text
+            resized();
+            messageBox.setVisible(true);
+            startTimer(1000);
+        }
     }
+}
+
+void EditTabBarView::plusButtonPressed() {
+    if (!midiCommandManager.isControlDown)
+        return;
+
+    if (captureBars < 8)
+        captureBars *= 2;
+
+    messageBox.setMessage("Capture bars: " + juce::String(captureBars));
+    resized();
+    messageBox.setVisible(true);
+    startTimer(1000);
+}
+
+void EditTabBarView::minusButtonPressed() {
+    if (!midiCommandManager.isControlDown)
+        return;
+
+    if (captureBars > 1)
+        captureBars /= 2;
+
+    messageBox.setMessage("Capture bars: " + juce::String(captureBars));
+    resized();
+    messageBox.setVisible(true);
+    startTimer(1000);
 }
 
 void EditTabBarView::mixerButtonReleased() {
@@ -236,6 +270,78 @@ void EditTabBarView::settingsButtonReleased() {
             }
         }
     }
+}
+
+void EditTabBarView::captureLastBars() {
+    auto *captureService = app_services::CaptureLastService::getInstance();
+    if (captureService == nullptr || !captureService->isReady()) {
+        messageBox.setMessage("Capture not ready");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
+    }
+
+    const auto position = edit.getTransport().getPosition();
+    const auto &timeSig = edit.tempoSequence.getTimeSigAt(position);
+    const double beatsPerBar = timeSig.numerator.get();
+    auto endBeats = edit.tempoSequence.toBeats(position).inBeats();
+    auto barEndBeats = std::floor(endBeats / beatsPerBar) * beatsPerBar;
+    auto barEnd = edit.tempoSequence.toTime(
+        tracktion::BeatPosition::fromBeats(barEndBeats));
+
+    double startBeats = barEndBeats - (captureBars * beatsPerBar);
+    if (startBeats < 0.0)
+        startBeats = 0.0;
+
+    auto barStart = edit.tempoSequence.toTime(
+        tracktion::BeatPosition::fromBeats(startBeats));
+
+    if (barStart >= barEnd) {
+        messageBox.setMessage("Capture range too short");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
+    }
+
+    auto captureDir = edit.engine.getTemporaryFileManager()
+                          .getTempDirectory()
+                          .getChildFile("captures");
+    captureDir.createDirectory();
+    auto captureFile =
+        captureDir.getNonexistentChildFile("capture", ".wav");
+
+    tracktion::TimeRange range(barStart, barEnd);
+    if (!captureService->captureToFile(range, captureFile)) {
+        messageBox.setMessage("Capture failed");
+        resized();
+        messageBox.setVisible(true);
+        startTimer(1000);
+        return;
+    }
+
+    auto audioTracks = tracktion::getAudioTracks(edit);
+    if (audioTracks.size() == 0) {
+        edit.ensureNumberOfAudioTracks(1);
+        audioTracks = tracktion::getAudioTracks(edit);
+    }
+
+    if (auto *track = audioTracks.getFirst()) {
+        tracktion::ClipPosition clipPosition{range};
+        auto clip =
+            track->insertWaveClip("capture", captureFile, clipPosition, false);
+        if (clip != nullptr)
+            messageBox.setMessage("Capture complete");
+        else
+            messageBox.setMessage("Capture clip failed");
+    } else {
+        messageBox.setMessage("No audio track");
+    }
+
+    resized();
+    messageBox.setVisible(true);
+    startTimer(1000);
 }
 
 void EditTabBarView::pluginsButtonReleased() {

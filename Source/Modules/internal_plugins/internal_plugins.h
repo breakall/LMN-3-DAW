@@ -8,7 +8,7 @@
   description:      Internal plugins for app
   website:          http://github.com/stonepreston
   license:          GPL-3.0
-  dependencies:     juce_data_structures tracktion_engine juce_events juce_core juce_graphics
+  dependencies:     juce_data_structures tracktion_engine juce_events juce_core juce_graphics app_services
  END_JUCE_MODULE_DECLARATION
 *******************************************************************************/
 #pragma once
@@ -17,6 +17,7 @@ namespace internal_plugins {
 
     class DrumSamplerPlugin;
     class DistortionPlugin;
+    class CaptureTapPlugin;
 }
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -28,6 +29,5 @@ namespace internal_plugins {
 
 #include "DrumSamplerPlugin/DrumSamplerPlugin.h"
 #include "DistortionPlugin/DistortionPlugin.h"
-
-
+#include "CaptureTapPlugin/CaptureTapPlugin.h"
 

@@ -193,10 +193,13 @@ target_link_libraries(LMN-3
         FontData
     #    SynthSampleData
     #    DrumSampleData
-        atomic
         yaml-cpp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+if (NOT APPLE)
+    target_link_libraries(LMN-3 PRIVATE atomic)
+endif ()

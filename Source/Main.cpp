@@ -47,6 +47,8 @@ class GuiAppApplication : public juce::JUCEApplication {
             .createBuiltInType<internal_plugins::DrumSamplerPlugin>();
         engine.getPluginManager()
             .createBuiltInType<internal_plugins::DistortionPlugin>();
+        engine.getPluginManager()
+            .createBuiltInType<internal_plugins::CaptureTapPlugin>();
 
         // this can cache all your plugins.
         /* auto &knownPluginList = engine.getPluginManager().knownPluginList;
@@ -141,6 +143,27 @@ class GuiAppApplication : public juce::JUCEApplication {
                         .getLast() == nullptr) {
                     track->pluginList.addDefaultTrackPlugins(false);
                 }
+
+                if (track->pluginList
+                        .getPluginsOfType<internal_plugins::CaptureTapPlugin>()
+                        .getLast() == nullptr) {
+                    juce::PluginDescription description;
+                    description.name =
+                        internal_plugins::CaptureTapPlugin::getPluginName();
+                    description.fileOrIdentifier = "capture_tap_trkbuiltin";
+                    description.pluginFormatName = "TracktionInternal";
+                    description.category =
+                        internal_plugins::CaptureTapPlugin::xmlTypeName;
+                    description.isInstrument = false;
+
+                    auto plugin = edit->getPluginCache().createNewPlugin(
+                        internal_plugins::CaptureTapPlugin::xmlTypeName,
+                        description);
+
+                    if (plugin != nullptr)
+                        track->pluginList.insertPlugin(
+                            plugin, track->pluginList.size(), nullptr);
+                }
             }
         }
 
@@ -152,6 +175,13 @@ class GuiAppApplication : public juce::JUCEApplication {
         midiCommandManager =
             std::make_unique<app_services::MidiCommandManager>(engine);
 
+        captureLastService =
+            std::make_unique<app_services::CaptureLastService>();
+        app_services::CaptureLastService::setInstance(
+            captureLastService.get());
+        internal_plugins::CaptureTapPlugin::setCaptureService(
+            captureLastService.get());
+
         if (auto uiBehavior =
                 dynamic_cast<ExtendedUIBehaviour *>(&engine.getUIBehaviour())) {
             uiBehavior->setEdit(edit.get());
@@ -159,6 +189,18 @@ class GuiAppApplication : public juce::JUCEApplication {
         }
 
         initialiseAudioDevices();
+        if (auto *device =
+                engine.getDeviceManager().deviceManager.getCurrentAudioDevice()) {
+            const double sampleRate = device->getCurrentSampleRate();
+            const double bpm =
+                edit->tempoSequence.getBpmAt(
+                    tracktion::TimePosition::fromSeconds(0.0));
+            const int beatsPerBar =
+                edit->tempoSequence
+                    .getTimeSigAt(tracktion::TimePosition::fromSeconds(0.0))
+                    .numerator.get();
+            captureLastService->configure(sampleRate, 2, bpm, beatsPerBar);
+        }
         mainWindow = std::make_unique<MainWindow>(getApplicationName(), engine,
                                                   *edit, *midiCommandManager);
 
@@ -292,6 +334,7 @@ class GuiAppApplication : public juce::JUCEApplication {
                              std::make_unique<ExtendedUIBehaviour>(), nullptr};
     std::unique_ptr<tracktion::Edit> edit;
     std::unique_ptr<app_services::MidiCommandManager> midiCommandManager;
+    std::unique_ptr<app_services::CaptureLastService> captureLastService;
     AppLookAndFeel appLookAndFeel;
     juce::SplashScreen *splash;
 };

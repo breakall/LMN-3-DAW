@@ -21,6 +21,8 @@ class EditTabBarView : public juce::TabbedComponent,
     void tempoSettingsButtonReleased() override;
     void saveButtonReleased() override;
     void renderButtonReleased() override;
+    void plusButtonPressed() override;
+    void minusButtonPressed() override;
     void mixerButtonReleased() override;
     void settingsButtonReleased() override;
     void pluginsButtonReleased() override;
@@ -56,9 +58,11 @@ class EditTabBarView : public juce::TabbedComponent,
 
     OctaveDisplayComponent octaveDisplayComponent;
     MessageBox messageBox;
+    int captureBars = 4;
 
     void timerCallback() override;
     void resetTrackRelatedTabs();
+    void captureLastBars();
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(EditTabBarView)
 };

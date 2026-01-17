@@ -6,3 +6,6 @@
 
 // TimelineCamera
 #include "TimelineCamera/TimelineCamera.cpp"
+
+// CaptureLastService
+#include "CaptureLastService/CaptureLastService.cpp"

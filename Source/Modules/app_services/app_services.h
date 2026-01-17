@@ -8,7 +8,7 @@
   description:      Service classes for app
   website:          http://github.com/stonepreston
   license:          GPL-3.0
-  dependencies:     juce_data_structures juce_events juce_core juce_graphics juce_gui_basics tracktion_engine
+  dependencies:     juce_data_structures juce_events juce_core juce_graphics juce_gui_basics juce_audio_basics juce_audio_formats tracktion_engine
  END_JUCE_MODULE_DECLARATION
 *******************************************************************************/
 
@@ -17,6 +17,7 @@
 namespace app_services {
 
     class MidiCommandManager;
+    class CaptureLastService;
     class TimelineCamera;
 
 }
@@ -31,6 +32,8 @@ namespace app_services {
 // MidiCommandManager
 #include "MidiCommandManager/MidiCommandManager.h"
 
+// CaptureLastService
+#include "CaptureLastService/CaptureLastService.h"
 
 // TimelineCamera
 #include "TimelineCamera/TimelineCamera.h"
