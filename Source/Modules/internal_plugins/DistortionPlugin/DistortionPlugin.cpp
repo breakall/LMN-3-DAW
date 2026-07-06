@@ -28,10 +28,12 @@ void DistortionPlugin::applyToBuffer(const tracktion::PluginRenderContext &fc) {
 
     for (int channel = 0; channel < fc.destBuffer->getNumChannels();
          ++channel) {
-        auto dest = fc.destBuffer->getWritePointer(channel);
+        auto dest =
+            fc.destBuffer->getWritePointer(channel, fc.bufferStartSample);
+        const auto drive = gain.get();
 
         for (int i = 0; i < fc.bufferNumSamples; ++i)
-            dest[i] = std::tanh(gain * dest[i]);
+            dest[i] = std::tanh(drive * dest[i]);
     }
 }
 

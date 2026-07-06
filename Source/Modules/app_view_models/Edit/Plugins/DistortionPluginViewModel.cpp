@@ -29,7 +29,10 @@ double DistortionPluginViewModel::getParameterValue(int index) {
 void DistortionPluginViewModel::setParameterValue(int index, double value) {
     switch (index) {
     case 0:
-        distortionPlugin->gain.setValue((float)value, nullptr);
+        if (distortionPlugin->gainParam->getModifiers().size() == 0)
+            distortionPlugin->gainParam->setParameter(
+                (float)getParameterRange(index).clipValue(value),
+                juce::dontSendNotification);
         break;
     default:
         break;
@@ -39,9 +42,9 @@ void DistortionPluginViewModel::setParameterValue(int index, double value) {
 juce::Range<double> DistortionPluginViewModel::getParameterRange(int index) {
     switch (index) {
     case 0:
-        return juce::Range<double>(0, 20);
+        return juce::Range<double>(0.1, 20.0);
     default:
-        return juce::Range<double>(0, 20);
+        return juce::Range<double>(0.1, 20.0);
     }
 }
 
