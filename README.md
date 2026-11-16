@@ -245,8 +245,8 @@ repository. The scripts patch the pinned JUCE 6 window snapshot implementation
 for macOS 15+ SDKs without changing the dependency versions.
 
 Double-click `Tools/Start Tape Demo.command` in the DAW repository. This opens
-the emulator first, then the tape screen using a separate, ignored `Tape Demo/`
-session. The emulator's MIDI Output should read **LMN-3 Emulator (virtual)**.
+the emulator first, then the tape screen using a separate session in
+`~/Library/Application Support/LMN-3/Tape Demo/`. The emulator's MIDI Output should read **LMN-3 Emulator (virtual)**.
 The first track (**PLAY SYNTH**) contains FourOsc; the second (**TRY EDITING**)
 contains an original generated audio phrase for immediate splitting and moving.
 The demo starts without a metronome or count-in. Use Save to preserve edits.
