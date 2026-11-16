@@ -32,6 +32,8 @@ class TracksListViewModel : public juce::ValueTree::Listener,
     void setTracksViewType(TracksViewType type);
 
     void startRecording();
+    juce::Result startTapeRecording();
+    bool isTapeRecording() const { return tapeTrack != nullptr; }
     void startPlaying();
     void stopRecordingOrPlaying();
     void nudgeTransportForward();
@@ -91,7 +93,12 @@ class TracksListViewModel : public juce::ValueTree::Listener,
     bool shouldUpdateSolo = false;
     bool shouldUpdateMute = false;
 
+    tracktion::AudioTrack::Ptr tapeSource, tapeTrack;
+    juce::StringArray tapeMidiInputs;
+    void finishTapeRecording();
+
     void initialiseInputs();
+    tracktion::Clip *getClipAtPlayhead();
 
     void handleAsyncUpdate() override;
 

@@ -4,8 +4,8 @@
 #include <internal_plugins/internal_plugins.h>
 #include <memory>
 #include <tracktion_engine/tracktion_engine.h>
-//#include <SynthSampleData.h>
-//#include <DrumSampleData.h>
+// #include <SynthSampleData.h>
+// #include <DrumSampleData.h>
 #include "App.h"
 #include "ExtendedUIBehaviour.h"
 
@@ -32,7 +32,8 @@ class GuiAppApplication : public juce::JUCEApplication {
     void initialise(const juce::String &commandLine) override {
         // This method is where you should put your application's initialisation
         // code..
-        juce::ignoreUnused(commandLine);
+        const auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        const bool demo = arguments.contains("--demo");
 
         // Create application wide file logger
         logger = std::unique_ptr<juce::FileLogger>(
@@ -50,6 +51,12 @@ class GuiAppApplication : public juce::JUCEApplication {
         juce::File editFile =
             userAppDataDirectory.getChildFile(getApplicationName())
                 .getChildFile("edit");
+        for (const auto &argument : arguments)
+            if (argument.startsWith("--edit-file="))
+                editFile =
+                    juce::File(argument.fromFirstOccurrenceOf("=", false, false)
+                                   .unquoted());
+        editFile.getParentDirectory().createDirectory();
         if (editFile.existsAsFile()) {
             edit = tracktion::loadEditFromFile(engine, editFile);
         } else {
@@ -59,6 +66,26 @@ class GuiAppApplication : public juce::JUCEApplication {
 
             for (auto track : tracktion::getAudioTracks(*edit))
                 track->setColour(appLookAndFeel.getRandomColour());
+            if (demo) {
+                auto tracks = tracktion::getAudioTracks(*edit);
+                tracks[0]->setName("PLAY SYNTH");
+                tracks[0]->setColour(juce::Colour(0xff53b6ef));
+                auto synth = edit->getPluginCache().createNewPlugin(
+                    tracktion::FourOscPlugin::xmlTypeName, {});
+                tracks[0]->pluginList.insertPlugin(synth, 0, nullptr);
+                tracks[1]->setName("TRY EDITING");
+                tracks[1]->setColour(juce::Colour(0xff71d5a3));
+                const auto phrase = editFile.getSiblingFile("demo-phrase.wav");
+                if (phrase.existsAsFile())
+                    tracks[1]->insertWaveClip(
+                        "Demo phrase", phrase,
+                        {tracktion::TimeRange(
+                             tracktion::TimePosition::fromSeconds(0),
+                             tracktion::TimePosition::fromSeconds(4)),
+                         tracktion::TimeDuration::fromSeconds(0)},
+                        false);
+                tracktion::EditFileOperations(*edit).save(false, true, false);
+            }
         }
 
         ConfigurationHelpers::initSamples(engine);
@@ -77,8 +104,9 @@ class GuiAppApplication : public juce::JUCEApplication {
 
         edit->getTransport().ensureContextAllocated();
 
-        edit->clickTrackEnabled.setValue(true, nullptr);
-        edit->setCountInMode(tracktion::Edit::CountIn::oneBar);
+        edit->clickTrackEnabled.setValue(!demo, nullptr);
+        edit->setCountInMode(demo ? tracktion::Edit::CountIn::none
+                                  : tracktion::Edit::CountIn::oneBar);
 
         midiCommandManager =
             std::make_unique<app_services::MidiCommandManager>(engine);

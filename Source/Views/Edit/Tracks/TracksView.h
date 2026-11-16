@@ -1,10 +1,7 @@
 #pragma once
 #include "AppLookAndFeel.h"
-#include "InformationPanelComponent.h"
-#include "LoopMarkerComponent.h"
-#include "PlayheadComponent.h"
+#include "TapeDeckComponent.h"
 #include "TrackView.h"
-#include "TracksListBoxModel.h"
 #include <app_navigation/app_navigation.h>
 #include <app_services/app_services.h>
 #include <app_view_models/app_view_models.h>
@@ -21,6 +18,7 @@ class TracksView : public juce::Component,
     TracksView(tracktion::Edit &e, app_services::MidiCommandManager &mcm);
     ~TracksView();
     void paint(juce::Graphics &) override;
+    void paintOverChildren(juce::Graphics &) override;
     void resized() override;
 
     void encoder1Increased() override;
@@ -79,23 +77,23 @@ class TracksView : public juce::Component,
     app_services::TimelineCamera camera;
     app_view_models::TracksListViewModel viewModel;
 
-    InformationPanelComponent informationPanel;
-    juce::ListBox singleTrackListBox;
-    juce::ListBox multiTrackListBox;
-    std::unique_ptr<TracksListBoxModel> listModel;
-
-    std::unique_ptr<TrackView> singleTrackView;
-
-    PlayheadComponent playheadComponent;
-
-    LoopMarkerComponent loopMarkerComponent;
-
-    juce::OwnedArray<juce::DrawableRectangle> beats;
+    TapeDeckComponent deck;
+    juce::OwnedArray<TrackView> lanes;
+    juce::Array<tracktion::AudioTrack::Ptr> visibleTracks;
+    juce::Rectangle<int> laneBounds, rulerBounds, controlsBounds;
+    int firstVisibleTrack = 0;
+    int labelWidth = 104;
+    juce::String message =
+        "CTRL+REC  record audio    SLICE  split    CUT / PASTE  lift / drop";
     AppLookAndFeel appLookAndFeel;
 
     bool shouldUpdateTrackColour = false;
 
-    void buildBeats();
+    void rebuildLanes();
+    void updateDeck();
+    void drawRuler(juce::Graphics &);
+    void drawControls(juce::Graphics &);
+    void changeZoom(double factor);
 
     void timerCallback() override;
 

@@ -51,7 +51,8 @@ void TrackViewModel::valueTreePropertyChanged(
     const juce::Identifier &property) {
     if (tracktion::Clip::isClipState(treeWhosePropertyHasChanged)) {
         if (property == tracktion::IDs::start ||
-            property == tracktion::IDs::length) {
+            property == tracktion::IDs::length ||
+            property == tracktion::IDs::offset) {
             markAndUpdate(shouldUpdateClipPositions);
         }
     }

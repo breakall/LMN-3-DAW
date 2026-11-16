@@ -1,75 +1,268 @@
 #include "TracksView.h"
-#include "AppLookAndFeel.h"
-#include "MixerView.h"
-#include <app_navigation/app_navigation.h>
+#include "TapeStyle.h"
+#include <cmath>
 
 TracksView::TracksView(tracktion::Edit &e,
                        app_services::MidiCommandManager &mcm)
-    : edit(e), midiCommandManager(mcm), camera(7), viewModel(e, camera),
-      listModel(std::make_unique<TracksListBoxModel>(viewModel.listViewModel,
-                                                     camera)),
-      singleTrackView(std::make_unique<TrackView>(
-          dynamic_cast<tracktion::AudioTrack *>(
-              viewModel.listViewModel.getSelectedItem()),
-          camera)) {
-    multiTrackListBox.setModel(listModel.get());
-    multiTrackListBox.getViewport()->setScrollBarsShown(false, false);
-    multiTrackListBox.setColour(juce::ListBox::backgroundColourId,
-                                juce::Colour(0x00282828));
-    multiTrackListBox.setAlwaysOnTop(true);
-    addAndMakeVisible(multiTrackListBox);
-
-    addAndMakeVisible(singleTrackView.get());
-
-    addAndMakeVisible(informationPanel);
-
-    playheadComponent.setAlwaysOnTop(true);
-    addAndMakeVisible(playheadComponent);
-
-    loopMarkerComponent.setAlwaysOnTop(true);
-    addAndMakeVisible(loopMarkerComponent);
-    loopMarkerComponent.setVisible(false);
-
+    : edit(e), midiCommandManager(mcm), camera(7), viewModel(e, camera) {
+    setOpaque(true);
+    addAndMakeVisible(deck);
     midiCommandManager.addListener(this);
-    // since this is the initial view we will manually set it to be the focused
-    // component
     midiCommandManager.setFocusedComponent(this);
-
     viewModel.addListener(this);
     viewModel.listViewModel.addListener(this);
     viewModel.listViewModel.itemListState.addListener(this);
-
-    startTimerHz(60);
+    rebuildLanes();
+    updateDeck();
+    startTimerHz(30);
 }
 
 TracksView::~TracksView() {
+    stopTimer();
     midiCommandManager.removeListener(this);
     viewModel.removeListener(this);
     viewModel.listViewModel.removeListener(this);
     viewModel.listViewModel.itemListState.removeListener(this);
-    stopTimer();
-}
-
-void TracksView::paint(juce::Graphics &g) {
-    g.fillAll(
-        getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
-    g.setColour(juce::Colours::white);
 }
 
 void TracksView::resized() {
-    informationPanel.setBounds(0, 0, getWidth(), getHeight() / 4);
+    if (getWidth() <= 0 || getHeight() <= 0)
+        return;
+    const int margin = getWidth() < 640 ? 12 : 24;
+    const int headerHeight = juce::jlimit(120, 164, getHeight() / 3);
+    labelWidth = getWidth() < 640 ? 80 : 104;
+    deck.setBounds(margin, 12, getWidth() - 2 * margin, headerHeight);
+    controlsBounds = {margin, getHeight() - 74, getWidth() - 2 * margin, 62};
+    const int laneTop = deck.getBottom() + 30;
+    laneBounds = {margin, laneTop, getWidth() - 2 * margin,
+                  juce::jmax(32, controlsBounds.getY() - 30 - laneTop)};
+    rulerBounds = {margin + labelWidth, laneTop - 24,
+                   laneBounds.getWidth() - labelWidth, 24};
+    const int count = viewModel.getTracksViewType() ==
+                              app_view_models::TracksListViewModel::
+                                  TracksViewType::SINGLE_TRACK
+                          ? 1
+                          : 4;
+    for (int i = 0; i < lanes.size(); ++i) {
+        const int top = laneBounds.getY() + laneBounds.getHeight() * i / count;
+        const int bottom =
+            laneBounds.getY() + laneBounds.getHeight() * (i + 1) / count;
+        lanes[i]->setBounds(rulerBounds.getX(), top + 3, rulerBounds.getWidth(),
+                            bottom - top - 6);
+    }
+    repaint();
+}
 
-    singleTrackView->setBounds(0, informationPanel.getHeight(), getWidth(),
-                               getHeight() - informationPanel.getHeight());
+void TracksView::rebuildLanes() {
+    auto tracks = tracktion::getAudioTracks(edit);
+    const int selected =
+        viewModel.listViewModel.itemListState.getSelectedItemIndex();
+    const bool focused =
+        viewModel.getTracksViewType() ==
+        app_view_models::TracksListViewModel::TracksViewType::SINGLE_TRACK;
+    firstVisibleTrack =
+        focused ? juce::jmax(0, selected) : juce::jmax(0, selected / 4 * 4);
+    juce::Array<tracktion::AudioTrack::Ptr> next;
+    for (int i = firstVisibleTrack;
+         i < juce::jmin(tracks.size(), firstVisibleTrack + (focused ? 1 : 4));
+         ++i)
+        next.add(tracks[i]);
+    if (next != visibleTracks) {
+        lanes.clear();
+        visibleTracks = next;
+        for (auto track : visibleTracks) {
+            auto lane = lanes.add(new TrackView(track, camera));
+            addAndMakeVisible(lane);
+        }
+    }
+    for (int i = 0; i < lanes.size(); ++i)
+        lanes[i]->setSelected(firstVisibleTrack + i == selected);
+    resized();
+}
 
-    multiTrackListBox.setBounds(0, informationPanel.getHeight(), getWidth(),
-                                getHeight() - informationPanel.getHeight());
-    multiTrackListBox.setRowHeight(getHeight() / 6);
-    multiTrackListBox.scrollToEnsureRowIsOnscreen(
-        viewModel.listViewModel.itemListState.getSelectedItemIndex());
+void TracksView::paint(juce::Graphics &g) {
+    g.fillAll(TapeStyle::background);
+    const int selected =
+        viewModel.listViewModel.itemListState.getSelectedItemIndex();
+    const bool focused =
+        viewModel.getTracksViewType() ==
+        app_view_models::TracksListViewModel::TracksViewType::SINGLE_TRACK;
+    const int count = focused ? 1 : 4;
+    for (int i = 0; i < count; ++i) {
+        const int y = laneBounds.getY() + laneBounds.getHeight() * i / count;
+        const int bottom =
+            laneBounds.getY() + laneBounds.getHeight() * (i + 1) / count;
+        const bool active =
+            i < visibleTracks.size() && firstVisibleTrack + i == selected;
+        auto row = juce::Rectangle<int>(laneBounds.getX(), y + 2,
+                                        laneBounds.getWidth(), bottom - y - 4);
+        g.setColour(active ? juce::Colour(0xff1d2c33)
+                           : TapeStyle::panel.withAlpha(.6f));
+        g.fillRoundedRectangle(row.toFloat(), 5);
+        if (active) {
+            g.setColour(TapeStyle::blue);
+            g.fillRoundedRectangle(static_cast<float>(row.getX()),
+                                   static_cast<float>(row.getY() + 6), 3.0f,
+                                   static_cast<float>(row.getHeight() - 12),
+                                   1.5f);
+        }
+        g.setFont(TapeStyle::mono(17));
+        g.setColour(active ? TapeStyle::blue : TapeStyle::muted);
+        g.drawText(juce::String(firstVisibleTrack + i + 1).paddedLeft('0', 2),
+                   row.getX() + 12, row.getY(), 30, row.getHeight(),
+                   juce::Justification::centredLeft);
+        g.setFont(TapeStyle::mono(10));
+        g.setColour(i < visibleTracks.size()
+                        ? TapeStyle::ink
+                        : TapeStyle::muted.withAlpha(.45f));
+        const auto name =
+            i < visibleTracks.size() ? visibleTracks[i]->getName() : "empty";
+        g.drawFittedText(name, row.getX() + 43, row.getY() + 6, labelWidth - 47,
+                         row.getHeight() - 12, juce::Justification::centredLeft,
+                         2);
+        if (i < visibleTracks.size()) {
+            const auto track = visibleTracks[i];
+            const auto badge = track->isMuted(false)  ? "M"
+                               : track->isSolo(false) ? "S"
+                                                      : "";
+            if (juce::String(badge).isNotEmpty()) {
+                g.setColour(TapeStyle::orange);
+                g.drawText(badge, row.getRight() - 18, row.getY() + 3, 14, 14,
+                           juce::Justification::centred);
+            }
+        }
+    }
+    drawRuler(g);
+    drawControls(g);
+    g.setFont(TapeStyle::mono(10));
+    g.setColour(TapeStyle::muted);
+    g.drawText(message, laneBounds.getX(), controlsBounds.getY() - 25,
+               laneBounds.getWidth(), 18, juce::Justification::centredLeft,
+               true);
+}
+
+void TracksView::drawRuler(juce::Graphics &g) {
+    if (rulerBounds.isEmpty())
+        return;
+    g.setFont(TapeStyle::mono(10));
+    g.setColour(TapeStyle::muted);
+    g.drawText("SECONDS", laneBounds.getX() + 12, rulerBounds.getY(),
+               labelWidth - 12, rulerBounds.getHeight(),
+               juce::Justification::centredLeft);
+    const double step = camera.getScope() <= 2    ? .25
+                        : camera.getScope() <= 10 ? 1
+                        : camera.getScope() <= 30 ? 5
+                                                  : 10;
+    const double left = camera.getCenter() - camera.getScope() / 2;
+    for (double t = std::ceil(left / step) * step;
+         t <= left + camera.getScope(); t += step) {
+        if (t < 0)
+            continue;
+        const int x =
+            rulerBounds.getX() +
+            juce::roundToInt(camera.timeToX(t, rulerBounds.getWidth()));
+        g.setColour(TapeStyle::line);
+        g.drawVerticalLine(x, static_cast<float>(laneBounds.getY()),
+                           static_cast<float>(laneBounds.getBottom()));
+        g.setColour(TapeStyle::muted);
+        g.drawText(
+            juce::String(std::abs(t) < .000001 ? 0.0 : t, step < 1 ? 2 : 0),
+            x - 20, rulerBounds.getY(), 40, rulerBounds.getHeight() - 4,
+            juce::Justification::centred);
+    }
+}
+
+void TracksView::paintOverChildren(juce::Graphics &g) {
+    const int x = rulerBounds.getCentreX();
+    if (rulerBounds.isEmpty())
+        return;
+    auto &transport = edit.getTransport();
+    if (transport.looping) {
+        const int left =
+            rulerBounds.getX() +
+            juce::roundToInt(camera.timeToX(transport.loopPoint1->inSeconds(),
+                                            rulerBounds.getWidth()));
+        const int right =
+            rulerBounds.getX() +
+            juce::roundToInt(camera.timeToX(transport.loopPoint2->inSeconds(),
+                                            rulerBounds.getWidth()));
+        const juce::Graphics::ScopedSaveState state(g);
+        g.reduceClipRegion(rulerBounds);
+        g.setColour(TapeStyle::green);
+        g.drawLine(static_cast<float>(left),
+                   static_cast<float>(rulerBounds.getBottom() - 2),
+                   static_cast<float>(right),
+                   static_cast<float>(rulerBounds.getBottom() - 2), 2);
+        g.fillRect(left, rulerBounds.getBottom() - 8, 2, 8);
+        g.fillRect(right, rulerBounds.getBottom() - 8, 2, 8);
+    }
+    g.setColour(transport.isRecording() ? TapeStyle::red : TapeStyle::ink);
+    g.fillRect(x, laneBounds.getY(), 1, laneBounds.getHeight());
+    juce::Path head;
+    head.addTriangle(
+        static_cast<float>(x - 5), static_cast<float>(laneBounds.getY() - 5),
+        static_cast<float>(x + 6), static_cast<float>(laneBounds.getY() - 5),
+        static_cast<float>(x), static_cast<float>(laneBounds.getY() + 1));
+    g.fillPath(head);
+}
+
+void TracksView::drawControls(juce::Graphics &g) {
+    const bool control = midiCommandManager.isControlDown;
+    auto &transport = edit.getTransport();
+    const int selected =
+        viewModel.listViewModel.itemListState.getSelectedItemIndex();
+    const auto total = tracktion::getAudioTracks(edit).size();
+    const juce::Colour colours[] = {TapeStyle::blue, TapeStyle::green,
+                                    TapeStyle::ink, TapeStyle::orange};
+    const juce::String titles[] = {"TRACK", control ? "LOOP IN" : "LOOP OUT",
+                                   control ? "BEAT POSITION" : "POSITION",
+                                   control ? "COLOUR" : "ZOOM"};
+    const juce::String values[] = {
+        juce::String(juce::jmax(0, selected + 1)).paddedLeft('0', 2) + " / " +
+            juce::String(total).paddedLeft('0', 2),
+        TapeStyle::time(control ? transport.loopPoint1->inSeconds()
+                                : transport.loopPoint2->inSeconds()),
+        TapeStyle::time(transport.getCurrentPosition()),
+        control ? "Track colour" : juce::String(camera.getScope(), 1) + " s"};
+    const juce::String hints[] = {"PUSH  focus lane", "CTRL  loop in",
+                                  "PUSH  solo", "PUSH  mute"};
+    for (int i = 0; i < 4; ++i) {
+        const int x = controlsBounds.getX() + controlsBounds.getWidth() * i / 4;
+        const int right =
+            controlsBounds.getX() + controlsBounds.getWidth() * (i + 1) / 4;
+        auto card =
+            juce::Rectangle<int>(x + (i == 0 ? 0 : 4), controlsBounds.getY(),
+                                 right - x - 4, controlsBounds.getHeight());
+        g.setColour(TapeStyle::panel);
+        g.fillRoundedRectangle(card.toFloat(), 5);
+        g.setColour(colours[i]);
+        g.fillEllipse(static_cast<float>(card.getX() + 10),
+                      static_cast<float>(card.getY() + 9), 5, 5);
+        g.setFont(TapeStyle::mono(getWidth() < 640 ? 9 : 10));
+        g.drawText(titles[i], card.getX() + 24, card.getY() + 4,
+                   card.getWidth() - 28, 16, juce::Justification::centredLeft);
+        g.setFont(TapeStyle::mono(getWidth() < 640 ? 13 : 16));
+        g.drawText(values[i], card.getX() + 10, card.getY() + 22,
+                   card.getWidth() - 20, 19, juce::Justification::centredLeft);
+        g.setColour(TapeStyle::muted);
+        g.setFont(TapeStyle::mono(9));
+        g.drawText(hints[i], card.getX() + 10, card.getY() + 43,
+                   card.getWidth() - 20, 15, juce::Justification::centredLeft);
+    }
+}
+
+void TracksView::changeZoom(double factor) {
+    camera.setScope(juce::jlimit(.5, 120.0, camera.getScope() * factor));
+    camera.setNudgeAmount(camera.getScope() / 80);
+    camera.setCenter(edit.getTransport().getCurrentPosition());
+    for (auto lane : lanes)
+        lane->resized();
+    repaint();
 }
 
 void TracksView::encoder1Increased() {
+    if (viewModel.isTapeRecording())
+        return;
     if (isShowing())
         if (midiCommandManager.getFocusedComponent() == this)
             viewModel.listViewModel.itemListState.setSelectedItemIndex(
@@ -78,6 +271,8 @@ void TracksView::encoder1Increased() {
 }
 
 void TracksView::encoder1Decreased() {
+    if (viewModel.isTapeRecording())
+        return;
     if (isShowing())
         if (midiCommandManager.getFocusedComponent() == this)
             viewModel.listViewModel.itemListState.setSelectedItemIndex(
@@ -86,23 +281,15 @@ void TracksView::encoder1Decreased() {
 }
 
 void TracksView::encoder1ButtonReleased() {
-    if (isShowing()) {
-        if (midiCommandManager.getFocusedComponent() == this) {
-            if (viewModel.getTracksViewType() ==
-                app_view_models::TracksListViewModel::TracksViewType::
-                    MULTI_TRACK)
-                viewModel.setTracksViewType(
+    if (isShowing() && midiCommandManager.getFocusedComponent() == this)
+        viewModel.setTracksViewType(
+            viewModel.getTracksViewType() ==
                     app_view_models::TracksListViewModel::TracksViewType::
-                        SINGLE_TRACK);
-            else
-                viewModel.setTracksViewType(
-                    app_view_models::TracksListViewModel::TracksViewType::
-                        MULTI_TRACK);
-
-            juce::Timer::callAfterDelay(1,
-                                        [this]() { sendLookAndFeelChange(); });
-        }
-    }
+                        MULTI_TRACK
+                ? app_view_models::TracksListViewModel::TracksViewType::
+                      SINGLE_TRACK
+                : app_view_models::TracksListViewModel::TracksViewType::
+                      MULTI_TRACK);
 }
 
 void TracksView::encoder2Increased() {
@@ -148,9 +335,18 @@ void TracksView::encoder3Decreased() {
     }
 }
 
-void TracksView::encoder3ButtonReleased() { viewModel.toggleSolo(); }
+void TracksView::encoder3ButtonReleased() {
+    if (isShowing() && midiCommandManager.getFocusedComponent() == this)
+        viewModel.toggleSolo();
+}
 
 void TracksView::encoder4Increased() {
+    if (!isShowing() || midiCommandManager.getFocusedComponent() != this)
+        return;
+    if (!midiCommandManager.isControlDown) {
+        changeZoom(0.8);
+        return;
+    }
     int colourIndex =
         appLookAndFeel.colours.indexOf(viewModel.getSelectedTrackColour());
     if (colourIndex == appLookAndFeel.colours.size() - 1)
@@ -162,6 +358,12 @@ void TracksView::encoder4Increased() {
 }
 
 void TracksView::encoder4Decreased() {
+    if (!isShowing() || midiCommandManager.getFocusedComponent() != this)
+        return;
+    if (!midiCommandManager.isControlDown) {
+        changeZoom(1.25);
+        return;
+    }
     int colourIndex =
         appLookAndFeel.colours.indexOf(viewModel.getSelectedTrackColour());
     if (colourIndex == 0)
@@ -172,7 +374,10 @@ void TracksView::encoder4Decreased() {
     viewModel.setSelectedTrackColour(appLookAndFeel.colours[colourIndex]);
 }
 
-void TracksView::encoder4ButtonReleased() { viewModel.toggleMute(); }
+void TracksView::encoder4ButtonReleased() {
+    if (isShowing() && midiCommandManager.getFocusedComponent() == this)
+        viewModel.toggleMute();
+}
 
 void TracksView::cutButtonReleased() {
     if (isShowing())
@@ -211,8 +416,7 @@ void TracksView::minusButtonReleased() {
 }
 
 void TracksView::loopingChanged(bool looping) {
-    informationPanel.setIsLooping(looping);
-    loopMarkerComponent.setVisible(looping);
+    repaint();
     resized();
 }
 void TracksView::loopInButtonReleased() {
@@ -235,8 +439,17 @@ void TracksView::loopButtonReleased() {
 
 void TracksView::recordButtonReleased() {
     if (isShowing())
-        if (midiCommandManager.getFocusedComponent() == this)
-            viewModel.startRecording();
+        if (midiCommandManager.getFocusedComponent() == this) {
+            if (midiCommandManager.isControlDown) {
+                auto result = viewModel.startTapeRecording();
+                message =
+                    (result.wasOk()
+                         ? "Recording synth audio. Press Stop to edit the tape."
+                         : result.getErrorMessage());
+            } else {
+                viewModel.startRecording();
+            }
+        }
 }
 
 void TracksView::playButtonReleased() {
@@ -247,207 +460,74 @@ void TracksView::playButtonReleased() {
 
 void TracksView::stopButtonReleased() {
     if (isShowing())
-        if (midiCommandManager.getFocusedComponent() == this)
+        if (midiCommandManager.getFocusedComponent() == this) {
+            const bool wasTapeRecording = viewModel.isTapeRecording();
             viewModel.stopRecordingOrPlaying();
+            if (wasTapeRecording)
+                message =
+                    ("Tape ready. Slice: split | Cut/Paste: lift/drop | Undo: "
+                     "restore");
+        }
 }
 
-void TracksView::selectedIndexChanged(int newIndex) {
-    multiTrackListBox.updateContent();
-    multiTrackListBox.selectRow(
-        viewModel.listViewModel.itemListState.getSelectedItemIndex());
-
-    if (auto track = dynamic_cast<tracktion::AudioTrack *>(
-            viewModel.listViewModel.getSelectedItem())) {
-        singleTrackView.reset();
-        singleTrackView = std::make_unique<TrackView>(*track, camera);
-        singleTrackView->setSelected(true);
-        singleTrackView->setBounds(0, informationPanel.getHeight(), getWidth(),
-                                   getHeight() - informationPanel.getHeight());
-        singleTrackView->setAlwaysOnTop(true);
-        addChildComponent(singleTrackView.get());
-        playheadComponent.setAlwaysOnTop(true);
-        addAndMakeVisible(playheadComponent);
-        playheadComponent.toFront(false);
-        loopMarkerComponent.toFront(false);
-    }
-
-    if (viewModel.getTracksViewType() ==
-        app_view_models::TracksListViewModel::TracksViewType::SINGLE_TRACK) {
-        singleTrackView->setVisible(true);
-        multiTrackListBox.setVisible(false);
-    } else {
-        singleTrackView->setVisible(false);
-        multiTrackListBox.setVisible(true);
-    }
-
-    // When deleting tracks in quick succession sometimes the selectedItem is
-    // null
-    if (viewModel.listViewModel.getSelectedItem() != nullptr) {
-        informationPanel.setTrackNumber(
-            viewModel.listViewModel.getSelectedItem()
-                ->getName()
-                .trimCharactersAtStart("Track "));
-        informationPanel.setIsSoloed(viewModel.getSelectedTrackSoloState());
-        informationPanel.setIsMuted(viewModel.getSelectedTrackMuteState());
-    }
-
-    sendLookAndFeelChange();
-    repaint();
-    resized();
+void TracksView::selectedIndexChanged(int) {
+    rebuildLanes();
+    updateDeck();
 }
 
-void TracksView::isRecordingChanged(bool isRecording) {
-    informationPanel.setIsRecording(isRecording);
-}
-
-void TracksView::isPlayingChanged(bool isPlaying) {
-    informationPanel.setIsPlaying(isPlaying);
-}
+void TracksView::isRecordingChanged(bool) { updateDeck(); }
+void TracksView::isPlayingChanged(bool) { updateDeck(); }
 
 void TracksView::itemsChanged() {
-    multiTrackListBox.updateContent();
-    multiTrackListBox.scrollToEnsureRowIsOnscreen(
-        viewModel.listViewModel.itemListState.getSelectedItemIndex());
-
-    if (auto track = dynamic_cast<tracktion::AudioTrack *>(
-            viewModel.listViewModel.getSelectedItem())) {
-        if (shouldUpdateTrackColour) {
-            track->setColour(appLookAndFeel.getRandomColour());
-            shouldUpdateTrackColour = false;
-        }
-
-        singleTrackView.reset();
-        singleTrackView = std::make_unique<TrackView>(*track, camera);
-        singleTrackView->setSelected(true);
-        singleTrackView->setBounds(0, informationPanel.getHeight(), getWidth(),
-                                   getHeight() - informationPanel.getHeight());
-        singleTrackView->setAlwaysOnTop(true);
-        addChildComponent(singleTrackView.get());
-        if (viewModel.getTracksViewType() ==
-            app_view_models::TracksListViewModel::TracksViewType::SINGLE_TRACK)
-            singleTrackView->setVisible(true);
-
-        playheadComponent.setAlwaysOnTop(true);
-        addAndMakeVisible(playheadComponent);
-        playheadComponent.toFront(false);
-        loopMarkerComponent.toFront(false);
+    if (shouldUpdateTrackColour) {
+        viewModel.setSelectedTrackColour(appLookAndFeel.getRandomColour());
+        shouldUpdateTrackColour = false;
     }
-
-    sendLookAndFeelChange();
-    resized();
-    repaint();
+    rebuildLanes();
+    updateDeck();
 }
 
 void TracksView::tracksViewTypeChanged(
-    app_view_models::TracksListViewModel::TracksViewType type) {
-    switch (type) {
-    case app_view_models::TracksListViewModel::TracksViewType::SINGLE_TRACK:
-
-        singleTrackView->setVisible(true);
-        multiTrackListBox.setVisible(false);
-        break;
-
-    case app_view_models::TracksListViewModel::TracksViewType::MULTI_TRACK:
-
-        multiTrackListBox.setVisible(true);
-        singleTrackView->setVisible(false);
-        break;
-
-    default:
-
-        multiTrackListBox.setVisible(true);
-        singleTrackView->setVisible(false);
-        break;
-    }
-
-    sendLookAndFeelChange();
-    resized();
-    repaint();
+    app_view_models::TracksListViewModel::TracksViewType) {
+    rebuildLanes();
 }
+void TracksView::soloStateChanged(bool) { repaint(); }
+void TracksView::muteStateChanged(bool) { repaint(); }
 
-void TracksView::soloStateChanged(bool solo) {
-    // really need to refactor the info component to handle all this stuff but
-    // its whatever
-    informationPanel.setIsSoloed(solo);
-}
-void TracksView::muteStateChanged(bool mute) {
-    informationPanel.setIsMuted(mute);
-}
-
-void TracksView::buildBeats() {
-    juce::Colour beatColour = appLookAndFeel.colour3.darker(.5f);
-    beats.clear();
-
-    double pxPerSec = getWidth() / camera.getScope();
-    double secondsPerBeat =
-        (1.0 / edit.tempoSequence.getBeatsPerSecondAt(
-                   tracktion::TimePosition::fromSeconds(0.0)));
-    // give a few extra beats per screen
-    int beatsPerScreen =
-        static_cast<int>((camera.getScope() / secondsPerBeat) + 2);
-    double pxPerBeat = secondsPerBeat * pxPerSec;
-    auto leftEdgeBeat = edit.tempoSequence
-                            .toBeats(tracktion::TimePosition::fromSeconds(
-                                camera.getCenter() - (camera.getScope() / 2.0)))
-                            .inBeats();
-    double beatOffset = ceil(leftEdgeBeat) - leftEdgeBeat;
-    double timeOffset = secondsPerBeat * beatOffset;
-
-    double pxOffset = timeOffset * pxPerSec;
-
-    int leftEdgeBeatNumber = static_cast<int>(ceil(leftEdgeBeat));
-
-    for (int i = 0; i < beatsPerScreen; i++) {
-        double beatX = (i * pxPerBeat) + pxOffset;
-        int beatNumber = leftEdgeBeatNumber + i;
-
-        beats.add(new juce::DrawableRectangle());
-        beats.getLast()->setFill(juce::FillType(beatColour));
-        beats.getLast()->setStrokeFill(juce::FillType(beatColour));
-        juce::Point<float> topLeft(beatX - .5, informationPanel.getHeight());
-        juce::Point<float> topRight(beatX + .5, informationPanel.getHeight());
-        juce::Point<float> bottomLeft(beatX - .5, getHeight());
-        juce::Parallelogram<float> bounds(topLeft, topRight, bottomLeft);
-        beats.getLast()->setRectangle(bounds);
-
-        if (beatNumber % 4 == 0) {
-            juce::Point<float> topLeft(beatX - 1.5,
-                                       informationPanel.getHeight());
-            juce::Point<float> topRight(beatX + 1.5,
-                                        informationPanel.getHeight());
-            juce::Point<float> bottomLeft(beatX - 1.5, getHeight());
-            juce::Parallelogram<float> bounds(topLeft, topRight, bottomLeft);
-            beats.getLast()->setRectangle(bounds);
+void TracksView::updateDeck() {
+    auto track = dynamic_cast<tracktion::AudioTrack *>(
+        viewModel.listViewModel.getSelectedItem());
+    juce::String lifted;
+    auto clipboard = tracktion::Clipboard::getInstance();
+    if (auto clips =
+            clipboard->getContentWithType<tracktion::Clipboard::Clips>()) {
+        if (!clips->clips.empty()) {
+            const auto &clip = clips->clips.front().state;
+            lifted = clip.getProperty(tracktion::IDs::name).toString() + " / " +
+                     juce::String(static_cast<double>(
+                                      clip.getProperty(tracktion::IDs::length)),
+                                  1) +
+                     " s";
         }
-
-        addAndMakeVisible(beats.getLast());
     }
+    auto &transport = edit.getTransport();
+    deck.update(transport.getCurrentPosition(), transport.isPlaying(),
+                transport.isRecording(),
+                track != nullptr ? track->getName() : "Select a synth to begin",
+                lifted);
 }
 
 void TracksView::timerCallback() {
-    informationPanel.setTimecode(edit.getTimecodeFormat().getString(
-        edit.tempoSequence, edit.getTransport().getPosition(), false));
-    playheadComponent.setBounds(
-        camera.timeToX(edit.getTransport().getCurrentPosition(), getWidth()),
-        informationPanel.getHeight(), 2,
-        getHeight() - informationPanel.getHeight());
-
-    double loop1X =
-        camera.timeToX(edit.getTransport().loopPoint1->inSeconds(), getWidth());
-    double loop2X =
-        camera.timeToX(edit.getTransport().loopPoint2->inSeconds(), getWidth());
-    double loopEndpointRadius = 12;
-    loopMarkerComponent.setBounds(
-        loop1X - loopEndpointRadius,
-        informationPanel.getHeight() - loopEndpointRadius,
-        loop2X - loop1X + 2 * loopEndpointRadius, 2 * loopEndpointRadius);
-
-    buildBeats();
+    if (!isShowing())
+        return;
+    camera.setCenter(edit.getTransport().getCurrentPosition());
+    for (auto lane : lanes)
+        lane->resized();
+    updateDeck();
     repaint();
 }
 
 void TracksView::undoButtonReleased() {
-    if (isShowing())
-        if (midiCommandManager.getFocusedComponent() == this)
-            viewModel.undo();
+    if (isShowing() && midiCommandManager.getFocusedComponent() == this)
+        viewModel.undo();
 }

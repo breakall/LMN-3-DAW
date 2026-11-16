@@ -1,5 +1,6 @@
 #include "TrackView.h"
 #include "MidiClipComponent.h"
+#include "WaveClipComponent.h"
 
 TrackView::TrackView(tracktion::AudioTrack::Ptr t,
                      app_services::TimelineCamera &cam)
@@ -10,7 +11,7 @@ TrackView::TrackView(tracktion::AudioTrack::Ptr t,
 
     addChildComponent(selectedTrackMarker);
 
-    startTimerHz(120);
+    startTimerHz(30);
 }
 
 TrackView::~TrackView() { viewModel.removeListener(this); }
@@ -36,7 +37,9 @@ void TrackView::resized() {
 
 void TrackView::setSelected(bool selected) {
     isSelected = selected;
-    selectedTrackMarker.setVisible(selected);
+    selectedTrackMarker.setVisible(false);
+    for (auto component : clips)
+        component->setTrackSelected(selected);
 }
 
 void TrackView::clipsChanged(const juce::Array<tracktion::Clip *> &clips) {
@@ -45,6 +48,8 @@ void TrackView::clipsChanged(const juce::Array<tracktion::Clip *> &clips) {
 void TrackView::clipPositionsChanged(
     const juce::Array<tracktion::Clip *> &clips) {
     resized();
+    for (auto component : this->clips)
+        component->repaint();
 }
 
 void TrackView::transportChanged() {
@@ -62,11 +67,17 @@ void TrackView::buildClips() {
             if (auto midiClip = dynamic_cast<tracktion::MidiClip *>(clip)) {
                 clips.add(new MidiClipComponent(clip, camera));
                 addAndMakeVisible(clips.getLast());
+            } else if (auto waveClip =
+                           dynamic_cast<tracktion::WaveAudioClip *>(clip)) {
+                clips.add(new WaveClipComponent(waveClip, camera));
+                addAndMakeVisible(clips.getLast());
             }
         }
     }
 
-    // resized();
+    for (auto component : clips)
+        component->setTrackSelected(isSelected);
+    resized();
 }
 
 void TrackView::buildRecordingClip() {
@@ -75,7 +86,7 @@ void TrackView::buildRecordingClip() {
     if (track->edit.getTransport().isRecording()) {
         for (auto in : track->edit.getAllInputDevices()) {
             if (in->isRecordingActive() &&
-                track.get() == in->getTargetTracks().getFirst()) {
+                in->getTargetTracks().contains(track.get())) {
                 needed = true;
                 break;
             }

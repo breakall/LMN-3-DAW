@@ -78,11 +78,13 @@ target_sources(LMN-3  PRIVATE
     Source/Views/Edit/Tracks/Markers/PlayheadComponent.cpp
     Source/Views/Edit/Tracks/Markers/LoopMarkerComponent.cpp
     Source/Views/Edit/Tracks/TracksView.cpp
+    Source/Views/Edit/Tracks/TapeDeckComponent.cpp
     Source/Views/Edit/Tracks/TracksListBoxModel.cpp
     Source/Views/Edit/Tracks/Track/TrackView.cpp
     Source/Views/Edit/Tracks/Track/SelectedTrackMarker.cpp
     Source/Views/Edit/Tracks/Track/Clips/ClipComponent.cpp
     Source/Views/Edit/Tracks/Track/Clips/MidiClipComponent.cpp
+    Source/Views/Edit/Tracks/Track/Clips/WaveClipComponent.cpp
     Source/Views/Edit/Tracks/Track/Clips/RecordingClipComponent.cpp
     Source/Views/Edit/Sequencers/AvailableSequencersListView.cpp
     Source/Views/Edit/Sequencers/StepSequencer/StepSequencerView.cpp
@@ -191,12 +193,39 @@ target_link_libraries(LMN-3
         FontData
     #    SynthSampleData
     #    DrumSampleData
-        atomic
+        $<$<PLATFORM_ID:Linux>:atomic>
         yaml-cpp
     PUBLIC
         juce::juce_recommended_config_flags
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags
 )
+
+option(BUILD_TAPE_PREVIEW "Build the tape screen renderer and control smoke checks" OFF)
+if(BUILD_TAPE_PREVIEW)
+    juce_add_console_app(TapeScreenPreview)
+    target_sources(TapeScreenPreview PRIVATE
+        Tools/TapeScreenPreview.cpp
+        Source/Views/LookAndFeel/AppLookAndFeel.cpp
+        Source/Views/Edit/Tracks/TracksView.cpp
+        Source/Views/Edit/Tracks/TapeDeckComponent.cpp
+        Source/Views/Edit/Tracks/Track/TrackView.cpp
+        Source/Views/Edit/Tracks/Track/SelectedTrackMarker.cpp
+        Source/Views/Edit/Tracks/Track/Clips/ClipComponent.cpp
+        Source/Views/Edit/Tracks/Track/Clips/MidiClipComponent.cpp
+        Source/Views/Edit/Tracks/Track/Clips/WaveClipComponent.cpp
+        Source/Views/Edit/Tracks/Track/Clips/RecordingClipComponent.cpp
+    )
+    get_target_property(TAPE_INCLUDE_DIRECTORIES LMN-3 INCLUDE_DIRECTORIES)
+    get_target_property(TAPE_LIBRARIES LMN-3 LINK_LIBRARIES)
+    target_include_directories(TapeScreenPreview PRIVATE ${TAPE_INCLUDE_DIRECTORIES})
+    target_link_libraries(TapeScreenPreview PRIVATE ${TAPE_LIBRARIES})
+    target_compile_definitions(TapeScreenPreview PRIVATE
+        JUCE_MODAL_LOOPS_PERMITTED=1 JUCE_PLUGINHOST_VST3=1
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0
+        JUCE_APPLICATION_NAME_STRING="LMN-3"
+        JUCE_APPLICATION_VERSION_STRING="${PROJECT_VERSION}"
+    )
+endif()
 
 
