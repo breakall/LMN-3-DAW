@@ -51,11 +51,13 @@ class GuiAppApplication : public juce::JUCEApplication {
         juce::File editFile =
             userAppDataDirectory.getChildFile(getApplicationName())
                 .getChildFile("edit");
-        for (const auto &argument : arguments)
+        for (const auto &token : arguments) {
+            const auto argument = token.unquoted();
             if (argument.startsWith("--edit-file="))
                 editFile =
                     juce::File(argument.fromFirstOccurrenceOf("=", false, false)
                                    .unquoted());
+        }
         editFile.getParentDirectory().createDirectory();
         if (editFile.existsAsFile()) {
             edit = tracktion::loadEditFromFile(engine, editFile);
