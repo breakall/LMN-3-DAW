@@ -47,6 +47,89 @@ The first time you run the application, the directories `~/.config/LMN-3/samples
 `~/.config/LMN-3/drum kits` will be automatically created. See the sections below for details on how to add
 synth samples and drum kits to the application.
 
+### Tape screen
+
+The Tracks screen is a tape deck with animated reels, a playhead and four
+waveform lanes. Blue highlights the selected track; the audio section under the
+playhead has a light outline. The reels turn during playback and recording,
+respond to position changes while stopped, and rest when the tape stops. The
+header shows transport time, the selected track and any lifted section.
+
+The four encoder cards show their current actions and values. Holding Control
+changes the labels to the alternate actions:
+
+| Encoder | Turn | Hold Control and turn | Push |
+| --- | --- | --- | --- |
+| Blue / 1 | Select track | Select track | Focus / four-lane view |
+| Green / 2 | Move loop out | Move loop in | — |
+| White / 3 | Move tape position | Move between beats | Solo |
+| Orange / 4 | Zoom in / out | Change track colour | Mute |
+
+Projects can still contain more than four tracks. Selecting a track beyond the
+visible group pages to the next four lanes. Orange changes the visible time
+range from 0.5 to 120 seconds and adjusts the fine-position increment with it.
+
+The tape layout targets the LMN-3's 4-inch HyperPixel at **800 × 480**.
+Typography follows `SimpleListItemView` and `ListTitle`: fonts occupy 70% of
+their text row height. The transport uses the menus' 56-pixel scale, track numbers
+use approximately 36 pixels, and the four encoder cards use 28-pixel labels
+with 36-pixel values in two spacious rows. Secondary status and ruler text use
+24 pixels. The focused view keeps the same readable track numbers.
+
+The selected track's full name appears above the transport. An 80-pixel gutter
+shows large track numbers and mute/solo badges, leaving 704 pixels for waveforms
+at 800 × 480. Names are not repeated beside each lane. The timeline starts at
+zero, so a clip beginning at zero sits directly beside the gutter. The playhead
+moves right until it reaches the centre; the timeline then follows playback. Overview waveforms only show clip names
+on the selected track.
+Persistent fine-print instructions have been removed; recording and error
+messages appear in the status strip. Control still shows the alternate encoder
+actions. Encoder time values show tenths; the transport retains milliseconds.
+The same gutter also fits 640 × 480 without shrinking the track numbers.
+
+### Record a synth phrase to tape
+
+On the Tracks screen, select a track with a synth or sampler instrument. Hold
+**Control** and press **Record**, then play the keyboard. This records the
+selected track's sound in real time to a new stereo audio track named after the
+source (for example, `Synth Tape`). Ordinary **Record** still records MIDI.
+
+Press **Stop** to finish. The tape track is selected automatically and its
+waveform appears on the timeline. The original synth remains available on its
+own track; the tape take contains audio rather than another MIDI performance.
+
+- Turn **encoder 3** to position the playhead. **Control + encoder 3** moves
+  between beats.
+- Press **Slice** to split the audio at the playhead.
+- Position the playhead inside a section and press **Cut** to lift it. At an
+  exact split boundary, Cut selects the section to the right.
+- Move the playhead to the destination and press **Paste** to drop it. Paste
+  keeps the section's source audio and advances the playhead by its length;
+  press it again to repeat the section. You can also choose another track
+  before dropping.
+- Press **Undo** to undo the last split, lift or drop. Press **Save** to save
+  the arrangement. Undo history follows the existing Tracks-screen behavior.
+
+Edits preserve the recording file. Dropping onto existing audio layers the
+clips, so choose an empty destination if you want to move sections without
+overlap. Recording captures everything sounding on the selected synth track,
+including any MIDI clips already on it. Other tracks are not part of the tape
+recording. For this first version, select the original synth again to record a
+new take; each Control + Record creates another tape track.
+
+To render the real screen with generated audio and exercise its controls on a
+development machine, build the optional preview tool:
+
+```sh
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TAPE_PREVIEW=ON
+cmake --build build --target TapeScreenPreview
+./build/TapeScreenPreview_artefacts/Debug/TapeScreenPreview "$PWD/build/tape-screen-preview"
+```
+
+On a headless Linux machine, prefix the last command with `xvfb-run -a`.
+The tool writes PNGs for stopped, playing, recording, lifted, zoomed, focused,
+Control-held and second-page states, plus reel-animation frames.
+
 ### Samples
 Place any audio sample files you wish to use with the Sampler plugin in `~/.config/LMN-3/samples`.
 
@@ -177,3 +260,30 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 ```
+
+### macOS tape demo
+
+The DAW and emulator are separate apps. Clone both with `--recurse-submodules`
+into sibling directories named `LMN-3-DAW` and `LMN-3-Emulator`. With Xcode,
+CMake, Ninja and Python 3 installed, run `bash Tools/build-macos.sh` in each
+repository. The scripts patch the pinned JUCE 6 window snapshot implementation
+for macOS 15+ SDKs without changing the dependency versions.
+
+Double-click `Tools/Start Tape Demo.command` in the DAW repository. This opens
+the emulator first, then the tape screen using a separate session in
+`~/Library/Application Support/LMN-3/Tape Demo/`. The emulator's MIDI Output should read **LMN-3 Emulator (virtual)**.
+The first track (**PLAY SYNTH**) contains FourOsc; the second (**TRY EDITING**)
+contains an original generated audio phrase for immediate splitting and moving.
+The demo starts without a metronome or count-in. Use Save to preserve edits.
+
+Keep the emulator window focused to play notes with `A W S E D F T G Y H U J K`.
+Use the mouse or trackpad to scroll the coloured encoders; double-click a knob
+to push it. Hold the Mac's **Control** key for alternate encoder functions and
+**Control + Record** for audio capture. Encoder 1 selects the track. Hover a
+button for its label: the five editing buttons are **Cut, Paste, Slice, Save,
+Undo** from left to right; the transport row begins **Control, Record, Play,
+Stop**. Keep the tape screen visible while operating the emulator.
+
+You can also launch the DAW directly with `--edit-file=/absolute/path/to/edit`
+to use a separate session; add `--demo` to seed a new session with FourOsc and
+an optional sibling `demo-phrase.wav`. Existing sessions are never reseeded.

@@ -22,10 +22,21 @@ TracksListViewModel::TracksListViewModel(tracktion::Edit &e,
     tracksViewType.referTo(state, IDs::tracksListViewType, nullptr,
                            static_cast<int>(TracksViewType::MULTI_TRACK));
 
+    tapeRecordStarter.setFunction([this] {
+        if (auto result = beginTapeRecording(); result.failed())
+            listeners.call([&result](Listener &listener) {
+                listener.tapeRecordingFailed(result.getErrorMessage());
+            });
+    });
     setCurrentPosition(0.0);
 }
 
 TracksListViewModel::~TracksListViewModel() {
+    tapeRecordStarter.cancelPendingUpdate();
+    if (isTapeRecording()) {
+        edit.getTransport().stop(false, false);
+        finishTapeRecording();
+    }
     listViewModel.removeListener(this);
     edit.state.removeListener(this);
     edit.getTransport().removeChangeListener(this);
@@ -44,8 +55,8 @@ void TracksListViewModel::initialiseInputs() {
     edit.getTransport().ensureContextAllocated();
 
     for (auto instance : edit.getAllInputDevices()) {
-        if (instance->getInputDevice().getDeviceType() ==
-            tracktion::InputDevice::physicalMidiDevice) {
+        if (instance->getInputDevice().isMidi() &&
+            !instance->getInputDevice().isTrackDevice()) {
             if (auto selectedTrack = dynamic_cast<tracktion::AudioTrack *>(
                     listViewModel.getSelectedItem())) {
                 instance->setTarget(selectedTrack->itemID, true, nullptr, 0);
@@ -58,6 +69,8 @@ void TracksListViewModel::initialiseInputs() {
 }
 
 void TracksListViewModel::addTrack() {
+    if (isTapeRecording())
+        return;
     edit.ensureNumberOfAudioTracks(listViewModel.getAdapter()->size() + 1);
 
     // since we are manually settings the selected index, we need to update the
@@ -69,6 +82,8 @@ void TracksListViewModel::addTrack() {
 }
 
 void TracksListViewModel::deleteSelectedTrack() {
+    if (edit.getTransport().isRecording())
+        return;
     if (auto track = dynamic_cast<tracktion::AudioTrack *>(
             listViewModel.getSelectedItem())) {
         // dont allow user to delete only remaining track
@@ -82,50 +97,47 @@ void TracksListViewModel::deleteSelectedTrack() {
     }
 }
 
-void TracksListViewModel::splitSelectedTracksClipAtPlayHead() {
+tracktion::Clip *TracksListViewModel::getClipAtPlayhead() {
     if (auto track = dynamic_cast<tracktion::AudioTrack *>(
             listViewModel.getSelectedItem())) {
-        if (auto trackItem = track->getNextTrackItemAt(
-                track->edit.getTransport().getPosition())) {
-            if (track->edit.getTransport().getPosition() >=
-                    trackItem->getPosition().getStart() &&
-                track->edit.getTransport().getPosition() <=
-                    trackItem->getPosition().getEnd()) {
-                if (auto clip = dynamic_cast<tracktion::Clip *>(trackItem)) {
-                    if (auto clipTrack = clip->getClipTrack()) {
-                        clipTrack->splitClip(*clip,
-                                             edit.getTransport().getPosition());
-                    }
-                }
-            }
+        const auto time = edit.getTransport().getPosition();
+        // Half-open ranges select the right-hand section at a split boundary.
+        for (auto clip : track->getClips()) {
+            const auto position = clip->getPosition();
+            if (position.getStart() <= time && time < position.getEnd())
+                return clip;
+        }
+    }
+    return nullptr;
+}
+
+void TracksListViewModel::splitSelectedTracksClipAtPlayHead() {
+    if (edit.getTransport().isRecording())
+        return;
+    if (auto clip = getClipAtPlayhead()) {
+        const auto time = edit.getTransport().getPosition();
+        if (time > clip->getPosition().getStart()) {
+            edit.getUndoManager().beginNewTransaction("Split tape");
+            clip->getClipTrack()->splitClip(*clip, time);
         }
     }
 }
 
 void TracksListViewModel::cutSelectedTracksClipAtPlayHead() {
-    if (auto track = dynamic_cast<tracktion::AudioTrack *>(
-            listViewModel.getSelectedItem())) {
-        if (auto trackItem = track->getNextTrackItemAt(
-                track->edit.getTransport().getPosition())) {
-            if (track->edit.getTransport().getPosition() >=
-                    trackItem->getPosition().getStart() &&
-                track->edit.getTransport().getPosition() <=
-                    trackItem->getPosition().getEnd()) {
-                if (auto clip = dynamic_cast<tracktion::Clip *>(trackItem)) {
-                    tracktion::Clipboard::getInstance()->clear();
-                    auto clipContent =
-                        std::make_unique<tracktion::Clipboard::Clips>();
-                    clipContent->addClip(0, clip->state);
-                    tracktion::Clipboard::getInstance()->setContent(
-                        std::move(clipContent));
-                    clip->removeFromParent();
-                }
-            }
-        }
+    if (edit.getTransport().isRecording())
+        return;
+    if (auto clip = getClipAtPlayhead()) {
+        auto content = std::make_unique<tracktion::Clipboard::Clips>();
+        content->addClip(0, clip->state);
+        tracktion::Clipboard::getInstance()->setContent(std::move(content));
+        edit.getUndoManager().beginNewTransaction("Lift tape");
+        clip->removeFromParent();
     }
 }
 
 void TracksListViewModel::mergeSelectedTracksClipsAtPlayhead() {
+    if (edit.getTransport().isRecording())
+        return;
     if (auto track = dynamic_cast<tracktion::AudioTrack *>(
             listViewModel.getSelectedItem())) {
         if (auto clip1 = dynamic_cast<tracktion::MidiClip *>(
@@ -149,6 +161,8 @@ void TracksListViewModel::mergeSelectedTracksClipsAtPlayhead() {
 }
 
 void TracksListViewModel::pasteClipboardContentToTrackAtPlayhead() {
+    if (edit.getTransport().isRecording())
+        return;
     if (auto track = dynamic_cast<tracktion::AudioTrack *>(
             listViewModel.getSelectedItem())) {
         auto clipboard = tracktion::Clipboard::getInstance();
@@ -164,7 +178,10 @@ void TracksListViewModel::pasteClipboardContentToTrackAtPlayhead() {
                 tracktion::Clipboard::ContentType::EditPastingOptions options(
                     edit, insertPoint);
 
-                double start = 0;
+                if (clipContent->clips.empty())
+                    return;
+                edit.getUndoManager().beginNewTransaction("Drop tape");
+                double start = std::numeric_limits<double>::max();
                 for (auto &i : clipContent->clips) {
                     auto end = i.hasBeatTimes
                                    ? edit.tempoSequence.toTime(i.startBeats)
@@ -172,7 +189,7 @@ void TracksListViewModel::pasteClipboardContentToTrackAtPlayhead() {
                                    : (static_cast<double>(i.state.getProperty(
                                          tracktion::IDs::start)));
 
-                    start = std::max(start, end);
+                    start = std::min(start, end);
                 }
 
                 options.startTime = tracktion::TimePosition::fromSeconds(
@@ -195,6 +212,8 @@ void TracksListViewModel::setTracksViewType(TracksViewType type) {
     tracksViewType.setValue(static_cast<int>(type), nullptr);
 }
 void TracksListViewModel::startRecording() {
+    if (isTapeRecording())
+        return;
     // ensure a selected track exists
 
     edit.clickTrackEnabled = true;
@@ -212,7 +231,139 @@ void TracksListViewModel::startRecording() {
     }
 }
 
+juce::Result TracksListViewModel::startTapeRecording() {
+    auto &transport = edit.getTransport();
+    if (transport.isPlaying() || transport.isRecording() || isTapeRecording())
+        return juce::Result::fail("Stop playback before recording to tape.");
+
+    auto source =
+        dynamic_cast<tracktion::AudioTrack *>(listViewModel.getSelectedItem());
+    if (source == nullptr)
+        return juce::Result::fail("Select a synth track first.");
+    bool hasSynth = false;
+    for (auto plugin : source->pluginList.getPlugins())
+        hasSynth = hasSynth || plugin->isSynth();
+    if (!hasSynth)
+        return juce::Result::fail("Select a track containing a synth first.");
+
+    auto &device = source->getWaveInputDevice();
+    if (edit.getEditInputDevices().isInputDeviceAssigned(device))
+        return juce::Result::fail(
+            "This synth already has an audio recording route.");
+    if (edit.engine.getDeviceManager().getSampleRate() <= 0)
+        return juce::Result::fail("Choose an audio output in Settings first.");
+
+    edit.getUndoManager().beginNewTransaction("Record synth to tape");
+    tapeSource = source;
+    tapeTrack = edit.insertNewAudioTrack(
+        tracktion::TrackInsertPoint(*source, false), nullptr);
+    if (tapeTrack == nullptr) {
+        tapeSource = nullptr;
+        return juce::Result::fail("Could not create the tape track.");
+    }
+    tapeTrack->setName(source->getName() + " Tape");
+    tapeTrack->setColour(source->getColour());
+
+    // Live MIDI still reaches the synth, but only its audio is recorded.
+    for (auto input : edit.getAllInputDevices()) {
+        if (input->getInputDevice().isMidi() &&
+            !input->getInputDevice().isTrackDevice() &&
+            input->getTargets().contains(source->itemID) &&
+            input->isRecordingEnabled(source->itemID)) {
+            tapeMidiInputs.emplace(input->getInputDevice().getName(),
+                                   input->getInputDevice().getMonitorMode());
+            input->getInputDevice().setMonitorMode(
+                tracktion::InputDevice::MonitorMode::on);
+            input->setRecordingEnabled(source->itemID, false);
+        }
+    }
+
+    device.setEnabled(true);
+    device.setMonitorMode(tracktion::InputDevice::MonitorMode::off); // Monitor the source once, not through both tracks.
+    device.setRecordTriggerDb(-100.0f);
+    device.setOutputFormat("WAV");
+    device.setMergeMode(tracktion::WaveInputDevice::getMergeModes()[0]);
+    edit.getEditInputDevices().getInstanceStateForInputDevice(device);
+    transport.ensureContextAllocated();
+    auto context = edit.getCurrentPlaybackContext();
+    auto input = context != nullptr ? context->getInputFor(&device) : nullptr;
+    if (input == nullptr) {
+        auto failedTrack = tapeTrack;
+        finishTapeRecording();
+        edit.deleteTrack(failedTrack);
+        return juce::Result::fail(
+            "Could not connect the synth to the tape track.");
+    }
+    input->setTarget(tapeTrack->itemID, true, nullptr, 0);
+    input->setRecordingEnabled(tapeTrack->itemID, true);
+    // Tracktion 3 queues recording-status updates when routing/arming changes.
+    // Start after those updates so they cannot stop the first recording block.
+    tapeRecordStarter.triggerAsyncUpdate();
+    return juce::Result::ok();
+}
+
+juce::Result TracksListViewModel::beginTapeRecording() {
+    auto &transport = edit.getTransport();
+    auto context = edit.getCurrentPlaybackContext();
+    auto input = context != nullptr && tapeSource != nullptr
+                     ? context->getInputFor(&tapeSource->getWaveInputDevice())
+                     : nullptr;
+    if (input == nullptr) {
+        auto failedTrack = tapeTrack;
+        finishTapeRecording();
+        if (failedTrack != nullptr)
+            edit.deleteTrack(failedTrack);
+        return juce::Result::fail("Could not connect the synth to the tape track.");
+    }
+    context->reallocate();
+    transport.record(false);
+    if (!transport.isRecording() || !input->isRecording()) {
+        auto failedTrack = tapeTrack;
+        transport.stop(true, false);
+        finishTapeRecording();
+        edit.deleteTrack(failedTrack);
+        return juce::Result::fail("Could not start audio recording.");
+    }
+    return juce::Result::ok();
+}
+
+void TracksListViewModel::finishTapeRecording() {
+    tapeRecordStarter.cancelPendingUpdate();
+    if (!isTapeRecording())
+        return;
+    auto recordedTrack = tapeTrack;
+    auto source = tapeSource;
+    tapeTrack = nullptr;
+    tapeSource = nullptr;
+    auto &device = source->getWaveInputDevice();
+    // Removing the route also removes its input instance. Never retain that
+    // pointer.
+    auto inputState =
+        edit.getEditInputDevices().getInstanceStateForInputDevice(device);
+    device.setEnabled(false);
+    inputState.getParent().removeChild(inputState, nullptr);
+    for (auto input : edit.getAllInputDevices()) {
+        auto previous = tapeMidiInputs.find(input->getInputDevice().getName());
+        if (previous != tapeMidiInputs.end()) {
+            input->getInputDevice().setMonitorMode(previous->second);
+            if (input->getTargets().contains(source->itemID))
+                input->setRecordingEnabled(source->itemID, true);
+        }
+    }
+    tapeMidiInputs.clear();
+
+    if (!recordedTrack->getClips().isEmpty()) {
+        auto tracks = tracktion::getAudioTracks(edit);
+        listViewModel.itemListState.listSize = tracks.size();
+        listViewModel.itemListState.setSelectedItemIndex(
+            tracks.indexOf(recordedTrack.get()));
+    }
+    edit.restartPlayback();
+}
+
 void TracksListViewModel::startPlaying() {
+    if (isTapeRecording())
+        return;
     edit.clickTrackEnabled = false;
 
     auto &transport = edit.getTransport();
@@ -223,9 +374,17 @@ void TracksListViewModel::startPlaying() {
 }
 
 void TracksListViewModel::stopRecordingOrPlaying() {
+    if (tapeRecordStarter.isUpdatePending()) {
+        auto cancelledTrack = tapeTrack;
+        finishTapeRecording();
+        if (cancelledTrack != nullptr)
+            edit.deleteTrack(cancelledTrack);
+        return;
+    }
     auto &transport = edit.getTransport();
     if (transport.isPlaying() || transport.isRecording()) {
         transport.stop(false, false);
+        finishTapeRecording();
 
         tracktion::EditFileOperations fileOperations(edit);
         fileOperations.save(true, true, false);
@@ -517,6 +676,8 @@ void TracksListViewModel::setVideoPosition(tracktion::TimePosition timePosition,
 }
 
 void TracksListViewModel::undo() {
+    if (edit.getTransport().isRecording())
+        return;
     if (edit.getUndoManager().canUndo())
         edit.getUndoManager().undo();
 }
@@ -548,9 +709,11 @@ void TracksListViewModel::handleAsyncUpdate() {
 }
 
 void TracksListViewModel::selectedIndexChanged(int /*newIndex*/) {
+    if (isTapeRecording())
+        return;
     for (auto instance : edit.getAllInputDevices()) {
-        if (instance->getInputDevice().getDeviceType() ==
-            tracktion::InputDevice::physicalMidiDevice) {
+        if (instance->getInputDevice().isMidi() &&
+            !instance->getInputDevice().isTrackDevice()) {
             if (auto selectedTrack = dynamic_cast<tracktion::AudioTrack *>(
                     listViewModel.getSelectedItem())) {
                 instance->setTarget(selectedTrack->itemID, true, nullptr, 0);
@@ -563,6 +726,9 @@ void TracksListViewModel::selectedIndexChanged(int /*newIndex*/) {
 }
 
 void TracksListViewModel::changeListenerCallback(juce::ChangeBroadcaster *) {
+    if (isTapeRecording() && !tapeRecordStarter.isUpdatePending() &&
+        !edit.getTransport().isRecording())
+        finishTapeRecording();
     if (edit.getTransport().isRecording()) {
         listeners.call([this](Listener &l) {
             l.isRecordingChanged(edit.getTransport().isRecording());

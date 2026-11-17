@@ -33,7 +33,8 @@ class GuiAppApplication : public juce::JUCEApplication {
     void initialise(const juce::String &commandLine) override {
         // This method is where you should put your application's initialisation
         // code..
-        juce::ignoreUnused(commandLine);
+        const auto arguments = juce::StringArray::fromTokens(commandLine, true);
+        const bool demo = arguments.contains("--demo");
 
         // Create application wide file logger
         logger = std::unique_ptr<juce::FileLogger>(
@@ -97,39 +98,48 @@ class GuiAppApplication : public juce::JUCEApplication {
             }
         }
 
-        if (latestFile.existsAsFile()) {
-            edit = tracktion::loadEditFromFile(engine, latestFile);
-            ConfigurationHelpers::setSavedTrackName(latestFile);
+        juce::File editFile = latestFile;
+        if (!editFile.existsAsFile())
+            editFile = savedDirectory.getChildFile(
+                "edit_" + juce::Time::getCurrentTime().formatted("%d%m%Y%H%M%S") + ".xml");
+        for (const auto &token : arguments) {
+            const auto argument = token.unquoted();
+            if (argument.startsWith("--edit-file="))
+                editFile = juce::File(argument.fromFirstOccurrenceOf("=", false, false).unquoted());
+        }
+        ConfigurationHelpers::setSavedTrackName(editFile);
+        editFile.getParentDirectory().createDirectory();
+        if (editFile.existsAsFile()) {
+            edit = tracktion::loadEditFromFile(engine, editFile);
         } else {
-            // Generate file name based on current date
-            auto currentTime = juce::Time::getCurrentTime();
-            auto day =
-                juce::String(currentTime.getDayOfMonth()).paddedLeft('0', 2);
-            auto month = juce::String(currentTime.getMonth() + 1)
-                             .paddedLeft('0', 2); // Meses son 0-based
-            auto year = juce::String(currentTime.getYear());
-            auto hours =
-                juce::String(currentTime.getHours()).paddedLeft('0', 2);
-            auto minutes =
-                juce::String(currentTime.getMinutes()).paddedLeft('0', 2);
-            auto seconds =
-                juce::String(currentTime.getSeconds()).paddedLeft('0', 2);
-
-            juce::String newEditFileName = "edit_" + day + month + year +
-                                           hours + minutes + seconds + ".xml";
-
-            auto editFile = savedDirectory.getChildFile(newEditFileName);
-
-            ConfigurationHelpers::setSavedTrackName(editFile);
-            // Create file and edit
             editFile.create();
             edit = tracktion::createEmptyEdit(engine, editFile);
-            edit->ensureNumberOfAudioTracks(
-                tracktion::getAudioTracks(*edit).size());
+            edit->ensureNumberOfAudioTracks(8);
 
             for (auto track : tracktion::getAudioTracks(*edit))
                 track->setColour(appLookAndFeel.getRandomColour());
+            if (demo) {
+                auto tracks = tracktion::getAudioTracks(*edit);
+                tracks[0]->setName("PLAY SYNTH");
+                tracks[0]->setColour(juce::Colour(0xff53b6ef));
+                auto synth = edit->getPluginCache().createNewPlugin(
+                    tracktion::FourOscPlugin::xmlTypeName, {});
+                tracks[0]->pluginList.insertPlugin(synth, 0, nullptr);
+                tracks[1]->setName("TRY EDITING");
+                tracks[1]->setColour(juce::Colour(0xff71d5a3));
+                const auto phrase = editFile.getSiblingFile("demo-phrase.wav");
+                if (phrase.existsAsFile())
+                    tracks[1]->insertWaveClip(
+                        "Demo phrase", phrase,
+                        {tracktion::TimeRange(
+                             tracktion::TimePosition::fromSeconds(0),
+                             tracktion::TimePosition::fromSeconds(4)),
+                         tracktion::TimeDuration::fromSeconds(0)},
+                        false);
+                tracktion::EditFileOperations(*edit).save(false, true, false);
+            }
         }
+
         ConfigurationHelpers::initSamples(engine);
 
         // The master track does not have the default  plugins added to it by
@@ -146,8 +156,9 @@ class GuiAppApplication : public juce::JUCEApplication {
 
         edit->getTransport().ensureContextAllocated();
 
-        edit->clickTrackEnabled.setValue(true, nullptr);
-        edit->setCountInMode(tracktion::Edit::CountIn::oneBar);
+        edit->clickTrackEnabled.setValue(!demo, nullptr);
+        edit->setCountInMode(demo ? tracktion::Edit::CountIn::none
+                                  : tracktion::Edit::CountIn::oneBar);
 
         midiCommandManager =
             std::make_unique<app_services::MidiCommandManager>(engine);
@@ -213,9 +224,6 @@ class GuiAppApplication : public juce::JUCEApplication {
         // quit();
     }
     void anotherInstanceStarted(const juce::String &commandLine) override {
-        // When another instance of the app is launched while this one is
-        // running, this method is invoked, and the commandLine parameter tells
-        // you what the other instance's command-line arguments were.
         juce::ignoreUnused(commandLine);
     }
 

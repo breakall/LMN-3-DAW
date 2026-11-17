@@ -10,3 +10,6 @@ cmake-build-release/
 
 *.vsidx
 .vs
+
+# Local tape demo session and recordings
+/Tape Demo/

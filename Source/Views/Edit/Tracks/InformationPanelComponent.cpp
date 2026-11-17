@@ -2,6 +2,12 @@
 #include "LabelColour1LookAndFeel.h"
 
 InformationPanelComponent::InformationPanelComponent() {
+    messageLabel.setText("Control + Record: record synth to a new tape track",
+                         juce::dontSendNotification);
+    messageLabel.setColour(juce::Label::textColourId,
+                           appLookAndFeel.textColour);
+    messageLabel.setJustificationType(juce::Justification::centred);
+    addAndMakeVisible(messageLabel);
     trackNumberLabel.setFont(
         juce::Font(juce::Font::getDefaultMonospacedFontName(),
                    getHeight() * 0.7f, juce::Font::plain));
@@ -50,6 +56,9 @@ InformationPanelComponent::~InformationPanelComponent() {
 void InformationPanelComponent::paint(juce::Graphics &) {}
 
 void InformationPanelComponent::resized() {
+    messageLabel.setFont(
+        juce::Font(juce::jlimit(10.0f, 16.0f, getHeight() * .15f)));
+    messageLabel.setBounds(0, getHeight() * 3 / 4, getWidth(), getHeight() / 4);
     double height = getHeight() * .5;
     // font awesome needs to be scaled down just a bit more
     fontAwesomeFont.setHeight(height * 0.6f);
@@ -63,9 +72,11 @@ void InformationPanelComponent::resized() {
         juce::Font(juce::Font::getDefaultMonospacedFontName(), iconHeight,
                    juce::Font::plain));
     int trackNumberLabelX = 5;
+    const int statusHeight = getHeight() * 3 / 4;
     trackNumberLabel.setBounds(
         trackNumberLabelX, 0,
-        trackNumberLabel.getFont().getStringWidthFloat("10") + 10, getHeight());
+        trackNumberLabel.getFont().getStringWidthFloat("10") + 10,
+        statusHeight);
 
     timecodeLabel.setFont(juce::Font(juce::Font::getDefaultMonospacedFontName(),
                                      iconHeight, juce::Font::plain));
@@ -75,18 +86,18 @@ void InformationPanelComponent::resized() {
     timecodeLabel.setBounds(
         timeCodeLabelX, 0,
         timecodeLabel.getFont().getStringWidthFloat(timecodeLabel.getText()),
-        getHeight());
+        statusHeight);
 
     int loopLabelX = getWidth() - 2 * height;
-    loopingLabel.setBounds(loopLabelX, 0, getHeight(), getHeight());
+    loopingLabel.setBounds(loopLabelX, 0, getHeight(), statusHeight);
     // recordingLabel.setBounds(playingStatusLabelX, 0, getHeight(),
     // getHeight());
 
     int soloLabelX = trackNumberLabelX + trackNumberLabel.getWidth() + 5;
-    soloLabel.setBounds(soloLabelX, 0, getHeight(), getHeight());
+    soloLabel.setBounds(soloLabelX, 0, getHeight(), statusHeight);
 
     int muteLabelX = soloLabelX + 60;
-    muteLabel.setBounds(muteLabelX, 0, getHeight(), getHeight());
+    muteLabel.setBounds(muteLabelX, 0, getHeight(), statusHeight);
 }
 
 void InformationPanelComponent::setIsPlaying(bool /*isPlaying*/) { resized(); }
@@ -127,4 +138,8 @@ void InformationPanelComponent::setIsSoloed(bool solo) {
 void InformationPanelComponent::setIsMuted(bool muted) {
     muteLabel.setVisible(muted);
     resized();
+}
+
+void InformationPanelComponent::setMessage(const juce::String &message) {
+    messageLabel.setText(message, juce::dontSendNotification);
 }

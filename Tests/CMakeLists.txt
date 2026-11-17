@@ -26,6 +26,7 @@ target_sources(Tests PRIVATE
         app_view_models/Edit/ItemList/ItemListStateTest.cpp
         app_view_models/Edit/ItemList/EditItemListViewModelTest.cpp
         app_view_models/Edit/Tracks/TracksListViewModelTest.cpp
+        app_view_models/Edit/Tracks/TapeRecordingTest.cpp
         app_view_models/Edit/Tracks/TrackViewModelTest.cpp
         app_view_models/Edit/Plugins/TrackPluginsListViewModelTest.cpp
         app_view_models/Edit/Plugins/AvailablePluginsViewModelTest.cpp
@@ -51,7 +52,7 @@ target_link_libraries(Tests PRIVATE
         app_models
         app_view_models
         app_configuration
-        atomic
+        $<$<PLATFORM_ID:Linux>:atomic>
         yaml-cpp
 )
 

@@ -9,9 +9,14 @@ class ClipComponent : public juce::Component {
 
     void paint(juce::Graphics &g) override;
     tracktion::Clip &getClip();
+    void setTrackSelected(bool selected) {
+        trackSelected = selected;
+        repaint();
+    }
 
   protected:
     tracktion::Clip::Ptr clip;
     app_services::TimelineCamera &camera;
     AppLookAndFeel appLookAndFeel;
+    bool trackSelected = false;
 };

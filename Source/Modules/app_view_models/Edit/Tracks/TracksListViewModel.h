@@ -1,4 +1,5 @@
 #pragma once
+#include <map>
 
 namespace app_view_models {
 
@@ -32,6 +33,8 @@ class TracksListViewModel : public juce::ValueTree::Listener,
     void setTracksViewType(TracksViewType type);
 
     void startRecording();
+    juce::Result startTapeRecording();
+    bool isTapeRecording() const { return tapeTrack != nullptr; }
     void startPlaying();
     void stopRecordingOrPlaying();
     void nudgeTransportForward();
@@ -71,6 +74,7 @@ class TracksListViewModel : public juce::ValueTree::Listener,
         virtual void loopingChanged(bool /*isLooping*/) {}
         virtual void soloStateChanged(bool /*solo*/) {}
         virtual void muteStateChanged(bool /*mute*/) {}
+        virtual void tapeRecordingFailed(const juce::String &) {}
     };
 
     void addListener(Listener *l);
@@ -91,7 +95,14 @@ class TracksListViewModel : public juce::ValueTree::Listener,
     bool shouldUpdateSolo = false;
     bool shouldUpdateMute = false;
 
+    tracktion::AudioTrack::Ptr tapeSource, tapeTrack;
+    std::map<juce::String, tracktion::InputDevice::MonitorMode> tapeMidiInputs;
+    tracktion::AsyncCaller tapeRecordStarter;
+    juce::Result beginTapeRecording();
+    void finishTapeRecording();
+
     void initialiseInputs();
+    tracktion::Clip *getClipAtPlayhead();
 
     void handleAsyncUpdate() override;
 

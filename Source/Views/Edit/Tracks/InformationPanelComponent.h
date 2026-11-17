@@ -20,6 +20,7 @@ class InformationPanelComponent : public juce::Component {
     void setIsLooping(bool isLooping);
     void setIsSoloed(bool solo);
     void setIsMuted(bool muted);
+    void setMessage(const juce::String &message);
 
   private:
     juce::Typeface::Ptr faTypeface = juce::Typeface::createSystemTypefaceFor(
@@ -32,6 +33,7 @@ class InformationPanelComponent : public juce::Component {
     juce::Label loopingLabel;
     juce::Label soloLabel;
     juce::Label muteLabel;
+    juce::Label messageLabel;
     LabelColour1LookAndFeel labelColour1LookAndFeel;
     AppLookAndFeel appLookAndFeel;
 };
