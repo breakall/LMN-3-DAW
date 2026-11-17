@@ -4,12 +4,33 @@ import sys
 from pathlib import Path
 for directory in sys.argv[1:]:
     path = Path(directory) / "modules/juce_gui_basics/native/juce_mac_Windowing.mm"
+    modern = not path.exists()
+    if modern:
+        path = Path(directory) / "modules/juce_gui_basics/native/juce_Windowing_mac.mm"
     with path.open(newline="") as f:
         original = f.read()
     newline = "\r\n" if "\r\n" in original else "\n"
     source = original.replace("\r\n", "\n")
     marker = "        // LMN-3: snapshot the local view on SDKs without CGWindowListCreateImage."
     if marker in source:
+        continue
+    if modern:
+        original_condition = "#if JUCE_MAC_API_VERSION_MIN_REQUIRED_AT_LEAST (14, 4)"
+        replacement = """#if defined(__MAC_OS_X_VERSION_MAX_ALLOWED) && __MAC_OS_X_VERSION_MAX_ALLOWED >= 150000
+        // LMN-3: snapshot the local view on SDKs without CGWindowListCreateImage.
+        NSView* view = [nsWindow contentView];
+        NSBitmapImageRep* bitmapRep = [view bitmapImageRepForCachingDisplayInRect: [view bounds]];
+        if (bitmapRep == nil)
+            return {};
+        [view cacheDisplayInRect: [view bounds] toBitmapImageRep: bitmapRep];
+        return createImageFromCGImage ([bitmapRep CGImage]);
+       #elif JUCE_MAC_API_VERSION_MIN_REQUIRED_AT_LEAST (14, 4)"""
+        if original_condition not in source:
+            raise RuntimeError("Unrecognised JUCE snapshot implementation")
+        source = source.replace(original_condition, replacement, 1)
+        with path.open("w", newline="") as f:
+            f.write(source.replace("\n", newline))
+        print("Patched", path)
         continue
     start = source.index("        CGImageRef screenShot = CGWindowListCreateImage", source.index("static Image createNSWindowSnapshot"))
     end = source.index("        return result;", start)

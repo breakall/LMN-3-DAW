@@ -10,7 +10,13 @@ independent of the tape editor UI.
 
 `coreaudio-compat.patch` targets the pinned JUCE revision
 `b0a8bc0ce2a9241c05f47c3a2b9b6b37e8f70513` in `tracktion_engine/modules/juce`.
-It contains three fixes:
+It contains three fixes. The community `main` pins newer JUCE revision
+`19edd538429c93d277bf95b55aaa7e3eb545f951`, which already includes fix 1.
+`coreaudio-modern-compat.patch` adapts only fixes 2 and 3 to that revision;
+the build script selects the matching patch by the dependency's source layout.
+No dependency revisions are downgraded.
+
+The original patch contains:
 
 1. Backport JUCE's upstream device-start deadlock fix
    [455c865d372a138eec4de64d38ce8074d542190e](https://github.com/juce-framework/JUCE/commit/455c865d372a138eec4de64d38ce8074d542190e).
@@ -28,7 +34,7 @@ It contains three fixes:
 
 ## Window snapshots
 
-The existing `patch_macos_juce.py` script replaces the unavailable
+The `patch_macos_juce.py` script supports both pinned source layouts and replaces the unavailable
 `CGWindowListCreateImage` call when compiling with macOS 15+ SDKs. Its fallback
 captures the local window view using AppKit. Older SDKs retain the original
 implementation; the two capture paths do not have identical screen-capture
@@ -36,8 +42,11 @@ semantics.
 
 ## Validation and scope
 
-Both native Release builds, the DAW's 88 tests, and its rendered tape-control
-checks passed on the development Mac. The repaired diagnostic DAW also ran with
+The original tape branch's native Release builds, 88 tests, and rendered
+tape-control checks passed on the development Mac. The community-main
+integration also passed all 89 tests, including real synth-to-audio capture,
+monitor restoration, cancellation, source preservation, undo, and save/reload.
+Its native tape rendering and control checks passed at 800×480. The repaired diagnostic DAW also ran with
 AddressSanitizer without repeating the startup buffer error. This is not a test
 matrix across all macOS versions, audio interfaces, device changes or sleep/wake.
 

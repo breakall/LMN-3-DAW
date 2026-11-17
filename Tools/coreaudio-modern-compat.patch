@@ -1,0 +1,35 @@
+diff --git a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
+index 143d626a77..a1a10c69d8 100644
+--- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
+@@ -673,6 +673,10 @@ public:
+         updateDetailsFromDevice (ins, outs);
+         sampleRate = newSampleRate;
+         bufferSize = bufferSizeSamples;
++        {
++            const ScopedLock sl (callbackLock);
++            allocateTempBuffers();
++        }
+ 
+         if (sampleRates.size() == 0)
+             return "Device has no available sample-rates";
+@@ -1636,18 +1640,7 @@ public:
+ 
+     void restartAsync() override
+     {
+-        {
+-            const ScopedLock sl (closeLock);
+-
+-            if (active)
+-            {
+-                if (callback != nullptr)
+-                    previousCallback = callback;
+-
+-                close();
+-            }
+-        }
+-
++        // Defer teardown until CoreAudio's property callback has returned.
+         startTimer (100);
+     }
+ 
