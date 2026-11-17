@@ -83,8 +83,7 @@ class TracksView : public juce::Component,
     juce::Rectangle<int> laneBounds, rulerBounds, controlsBounds;
     int firstVisibleTrack = 0;
     int labelWidth = 104;
-    juce::String message =
-        "CTRL+REC  record audio    SLICE  split    CUT / PASTE  lift / drop";
+    juce::String message;
     AppLookAndFeel appLookAndFeel;
 
     bool shouldUpdateTrackColour = false;

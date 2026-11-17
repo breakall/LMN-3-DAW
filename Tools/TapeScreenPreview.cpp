@@ -126,6 +126,12 @@ int main(int argc, char **argv) {
         AudioClock clock(audio);
         auto &model = view.getViewModel();
         auto &transport = edit->getTransport();
+        transport.setCurrentPosition(0);
+        pump(600);
+        result |= !save(view, output.getChildFile("tape-start.png"));
+        transport.setCurrentPosition(10);
+        pump(100);
+        result |= !save(view, output.getChildFile("tape-scrolled.png"));
         transport.setCurrentPosition(3.2);
         pump(600); // waveform thumbnails load asynchronously
         result |= !save(view, output.getChildFile("tape-stopped.png"));

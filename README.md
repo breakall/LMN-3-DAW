@@ -42,7 +42,7 @@ synth samples and drum kits to the application.
 
 ### Tape screen
 
-The Tracks screen is a tape deck with animated reels, a fixed playhead and four
+The Tracks screen is a tape deck with animated reels, a playhead and four
 waveform lanes. Blue highlights the selected track; the audio section under the
 playhead has a light outline. The reels turn during playback and recording,
 respond to position changes while stopped, and rest when the tape stops. The
@@ -61,6 +61,24 @@ changes the labels to the alternate actions:
 Projects can still contain more than four tracks. Selecting a track beyond the
 visible group pages to the next four lanes. Orange changes the visible time
 range from 0.5 to 120 seconds and adjusts the fine-position increment with it.
+
+The tape layout targets the LMN-3's 4-inch HyperPixel at **800 × 480**.
+Typography follows `SimpleListItemView` and `ListTitle`: fonts occupy 70% of
+their text row height. The transport uses the menus' 56-pixel scale, track numbers
+use approximately 36 pixels, and the four encoder cards use 28-pixel labels
+with 36-pixel values in two spacious rows. Secondary status and ruler text use
+24 pixels. The focused view keeps the same readable track numbers.
+
+The selected track's full name appears above the transport. An 80-pixel gutter
+shows large track numbers and mute/solo badges, leaving 704 pixels for waveforms
+at 800 × 480. Names are not repeated beside each lane. The timeline starts at
+zero, so a clip beginning at zero sits directly beside the gutter. The playhead
+moves right until it reaches the centre; the timeline then follows playback. Overview waveforms only show clip names
+on the selected track.
+Persistent fine-print instructions have been removed; recording and error
+messages appear in the status strip. Control still shows the alternate encoder
+actions. Encoder time values show tenths; the transport retains milliseconds.
+The same gutter also fits 640 × 480 without shrinking the track numbers.
 
 ### Record a synth phrase to tape
 

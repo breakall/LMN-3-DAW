@@ -17,6 +17,9 @@ inline juce::Font mono(float size) {
                       juce::Font::plain);
 }
 
+// Match SimpleListItemView and ListTitle: type occupies 70% of its row.
+inline juce::Font rowFont(float rowHeight) { return mono(rowHeight * .7f); }
+
 inline juce::String time(double seconds) {
     const auto milliseconds = juce::jmax(0, juce::roundToInt(seconds * 1000));
     return juce::String::formatted("%02d:%02d.%03d", milliseconds / 60000,

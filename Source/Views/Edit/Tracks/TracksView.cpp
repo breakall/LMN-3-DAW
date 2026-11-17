@@ -28,14 +28,16 @@ TracksView::~TracksView() {
 void TracksView::resized() {
     if (getWidth() <= 0 || getHeight() <= 0)
         return;
-    const int margin = getWidth() < 640 ? 12 : 24;
-    const int headerHeight = juce::jlimit(120, 164, getHeight() / 3);
-    labelWidth = getWidth() < 640 ? 80 : 104;
-    deck.setBounds(margin, 12, getWidth() - 2 * margin, headerHeight);
-    controlsBounds = {margin, getHeight() - 74, getWidth() - 2 * margin, 62};
-    const int laneTop = deck.getBottom() + 30;
+    const int margin = 8;
+    // Keep four lanes while following the menu row typography and spacing.
+    const int headerHeight = juce::jlimit(80, 104, getHeight() / 5);
+    // The selected name is already in the deck header; lanes need only an ID.
+    labelWidth = 80;
+    deck.setBounds(margin, 4, getWidth() - 2 * margin, headerHeight);
+    controlsBounds = {margin, getHeight() - 108, getWidth() - 2 * margin, 100};
+    const int laneTop = deck.getBottom() + 24;
     laneBounds = {margin, laneTop, getWidth() - 2 * margin,
-                  juce::jmax(32, controlsBounds.getY() - 30 - laneTop)};
+                  juce::jmax(32, controlsBounds.getY() - 32 - laneTop)};
     rulerBounds = {margin + labelWidth, laneTop - 24,
                    laneBounds.getWidth() - labelWidth, 24};
     const int count = viewModel.getTracksViewType() ==
@@ -106,20 +108,11 @@ void TracksView::paint(juce::Graphics &g) {
                                    static_cast<float>(row.getHeight() - 12),
                                    1.5f);
         }
-        g.setFont(TapeStyle::mono(17));
+        g.setFont(TapeStyle::rowFont(52));
         g.setColour(active ? TapeStyle::blue : TapeStyle::muted);
         g.drawText(juce::String(firstVisibleTrack + i + 1).paddedLeft('0', 2),
-                   row.getX() + 12, row.getY(), 30, row.getHeight(),
+                   row.getX() + 10, row.getY(), 44, row.getHeight(),
                    juce::Justification::centredLeft);
-        g.setFont(TapeStyle::mono(10));
-        g.setColour(i < visibleTracks.size()
-                        ? TapeStyle::ink
-                        : TapeStyle::muted.withAlpha(.45f));
-        const auto name =
-            i < visibleTracks.size() ? visibleTracks[i]->getName() : "empty";
-        g.drawFittedText(name, row.getX() + 43, row.getY() + 6, labelWidth - 47,
-                         row.getHeight() - 12, juce::Justification::centredLeft,
-                         2);
         if (i < visibleTracks.size()) {
             const auto track = visibleTracks[i];
             const auto badge = track->isMuted(false)  ? "M"
@@ -127,29 +120,30 @@ void TracksView::paint(juce::Graphics &g) {
                                                       : "";
             if (juce::String(badge).isNotEmpty()) {
                 g.setColour(TapeStyle::orange);
-                g.drawText(badge, row.getRight() - 18, row.getY() + 3, 14, 14,
+                g.setFont(TapeStyle::mono(24));
+                g.drawText(badge, row.getX() + labelWidth - 24, row.getCentreY() - 14, 24, 28,
                            juce::Justification::centred);
             }
         }
     }
     drawRuler(g);
     drawControls(g);
-    g.setFont(TapeStyle::mono(10));
+    g.setFont(TapeStyle::mono(24));
     g.setColour(TapeStyle::muted);
-    g.drawText(message, laneBounds.getX(), controlsBounds.getY() - 25,
-               laneBounds.getWidth(), 18, juce::Justification::centredLeft,
+    g.drawText(message, laneBounds.getX(), controlsBounds.getY() - 30,
+               laneBounds.getWidth(), 28, juce::Justification::centredLeft,
                true);
 }
 
 void TracksView::drawRuler(juce::Graphics &g) {
     if (rulerBounds.isEmpty())
         return;
-    g.setFont(TapeStyle::mono(10));
+    g.setFont(TapeStyle::mono(24));
     g.setColour(TapeStyle::muted);
-    g.drawText("SECONDS", laneBounds.getX() + 12, rulerBounds.getY(),
+    g.drawText("s", laneBounds.getX() + 12, rulerBounds.getY(),
                labelWidth - 12, rulerBounds.getHeight(),
                juce::Justification::centredLeft);
-    const double step = camera.getScope() <= 2    ? .25
+    const double step = camera.getScope() <= 2    ? .5
                         : camera.getScope() <= 10 ? 1
                         : camera.getScope() <= 30 ? 5
                                                   : 10;
@@ -166,17 +160,21 @@ void TracksView::drawRuler(juce::Graphics &g) {
                            static_cast<float>(laneBounds.getBottom()));
         g.setColour(TapeStyle::muted);
         g.drawText(
-            juce::String(std::abs(t) < .000001 ? 0.0 : t, step < 1 ? 2 : 0),
-            x - 20, rulerBounds.getY(), 40, rulerBounds.getHeight() - 4,
-            juce::Justification::centred);
+            juce::String(std::abs(t) < .000001 ? 0.0 : t, step < 1 ? 1 : 0),
+            juce::jlimit(rulerBounds.getX(), rulerBounds.getRight() - 64,
+                         x - 32), rulerBounds.getY(), 64, rulerBounds.getHeight() - 4,
+            x - 32 < rulerBounds.getX() ? juce::Justification::centredLeft
+            : x + 32 > rulerBounds.getRight() ? juce::Justification::centredRight
+                                               : juce::Justification::centred);
     }
 }
 
 void TracksView::paintOverChildren(juce::Graphics &g) {
-    const int x = rulerBounds.getCentreX();
     if (rulerBounds.isEmpty())
         return;
     auto &transport = edit.getTransport();
+    const int x = rulerBounds.getX() + juce::roundToInt(
+        camera.timeToX(transport.getCurrentPosition(), rulerBounds.getWidth()));
     if (transport.looping) {
         const int left =
             rulerBounds.getX() +
@@ -214,18 +212,16 @@ void TracksView::drawControls(juce::Graphics &g) {
     const auto total = tracktion::getAudioTracks(edit).size();
     const juce::Colour colours[] = {TapeStyle::blue, TapeStyle::green,
                                     TapeStyle::ink, TapeStyle::orange};
-    const juce::String titles[] = {"TRACK", control ? "LOOP IN" : "LOOP OUT",
-                                   control ? "BEAT POSITION" : "POSITION",
-                                   control ? "COLOUR" : "ZOOM"};
+    const juce::String titles[] = {"Track", control ? "Loop in" : "Loop out",
+                                   control ? "Beat" : "Position",
+                                   control ? "Colour" : "Zoom"};
     const juce::String values[] = {
-        juce::String(juce::jmax(0, selected + 1)).paddedLeft('0', 2) + " / " +
+        juce::String(juce::jmax(0, selected + 1)).paddedLeft('0', 2) + "/" +
             juce::String(total).paddedLeft('0', 2),
         TapeStyle::time(control ? transport.loopPoint1->inSeconds()
-                                : transport.loopPoint2->inSeconds()),
-        TapeStyle::time(transport.getCurrentPosition()),
-        control ? "Track colour" : juce::String(camera.getScope(), 1) + " s"};
-    const juce::String hints[] = {"PUSH  focus lane", "CTRL  loop in",
-                                  "PUSH  solo", "PUSH  mute"};
+                                : transport.loopPoint2->inSeconds()).dropLastCharacters(2),
+        TapeStyle::time(transport.getCurrentPosition()).dropLastCharacters(2),
+        control ? "Palette" : juce::String(camera.getScope(), 1) + " s"};
     for (int i = 0; i < 4; ++i) {
         const int x = controlsBounds.getX() + controlsBounds.getWidth() * i / 4;
         const int right =
@@ -236,25 +232,22 @@ void TracksView::drawControls(juce::Graphics &g) {
         g.setColour(TapeStyle::panel);
         g.fillRoundedRectangle(card.toFloat(), 5);
         g.setColour(colours[i]);
-        g.fillEllipse(static_cast<float>(card.getX() + 10),
-                      static_cast<float>(card.getY() + 9), 5, 5);
-        g.setFont(TapeStyle::mono(getWidth() < 640 ? 9 : 10));
-        g.drawText(titles[i], card.getX() + 24, card.getY() + 4,
-                   card.getWidth() - 28, 16, juce::Justification::centredLeft);
-        g.setFont(TapeStyle::mono(getWidth() < 640 ? 13 : 16));
-        g.drawText(values[i], card.getX() + 10, card.getY() + 22,
-                   card.getWidth() - 20, 19, juce::Justification::centredLeft);
-        g.setColour(TapeStyle::muted);
-        g.setFont(TapeStyle::mono(9));
-        g.drawText(hints[i], card.getX() + 10, card.getY() + 43,
-                   card.getWidth() - 20, 15, juce::Justification::centredLeft);
+        // Two generous text rows replace three lines of miniature labels.
+        g.setFont(TapeStyle::rowFont(getWidth() < 720 ? 34 : 40));
+        g.drawText(titles[i], card.getX() + 10, card.getY() + 6,
+                   card.getWidth() - 20, 38, juce::Justification::centredLeft);
+        g.setFont(TapeStyle::rowFont(getWidth() < 720 ? 42 : 52));
+        g.drawText(values[i], card.getX() + 10, card.getY() + 44,
+                   card.getWidth() - 20, 52, juce::Justification::centredLeft);
     }
 }
 
 void TracksView::changeZoom(double factor) {
     camera.setScope(juce::jlimit(.5, 120.0, camera.getScope() * factor));
     camera.setNudgeAmount(camera.getScope() / 80);
-    camera.setCenter(edit.getTransport().getCurrentPosition());
+    // Do not reserve screen space for negative tape time.
+    camera.setCenter(juce::jmax(camera.getScope() / 2.0,
+                              edit.getTransport().getCurrentPosition()));
     for (auto lane : lanes)
         lane->resized();
     repaint();
@@ -444,7 +437,7 @@ void TracksView::recordButtonReleased() {
                 auto result = viewModel.startTapeRecording();
                 message =
                     (result.wasOk()
-                         ? "Recording synth audio. Press Stop to edit the tape."
+                         ? "Recording audio. Stop to finish."
                          : result.getErrorMessage());
             } else {
                 viewModel.startRecording();
@@ -465,8 +458,7 @@ void TracksView::stopButtonReleased() {
             viewModel.stopRecordingOrPlaying();
             if (wasTapeRecording)
                 message =
-                    ("Tape ready. Slice: split | Cut/Paste: lift/drop | Undo: "
-                     "restore");
+                    ("Tape ready. Slice / Cut / Paste / Undo");
         }
 }
 
@@ -503,7 +495,7 @@ void TracksView::updateDeck() {
             clipboard->getContentWithType<tracktion::Clipboard::Clips>()) {
         if (!clips->clips.empty()) {
             const auto &clip = clips->clips.front().state;
-            lifted = clip.getProperty(tracktion::IDs::name).toString() + " / " +
+            lifted = clip.getProperty(tracktion::IDs::name).toString() + "/" +
                      juce::String(static_cast<double>(
                                       clip.getProperty(tracktion::IDs::length)),
                                   1) +
@@ -520,7 +512,9 @@ void TracksView::updateDeck() {
 void TracksView::timerCallback() {
     if (!isShowing())
         return;
-    camera.setCenter(edit.getTransport().getCurrentPosition());
+    // Do not reserve screen space for negative tape time.
+    camera.setCenter(juce::jmax(camera.getScope() / 2.0,
+                              edit.getTransport().getCurrentPosition()));
     for (auto lane : lanes)
         lane->resized();
     updateDeck();

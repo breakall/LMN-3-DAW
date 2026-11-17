@@ -32,16 +32,21 @@ void WaveClipComponent::paint(juce::Graphics &g) {
     g.fillRoundedRectangle(getLocalBounds().toFloat().reduced(.5f), 3);
     g.setColour(underHead ? TapeStyle::ink : colour.withAlpha(.7f));
     g.drawRoundedRectangle(getLocalBounds().toFloat().reduced(.5f), 3, 1);
-    g.setFont(TapeStyle::mono(9));
-    g.drawText(clip->getName(), 6, 2, juce::jmax(0, getWidth() - 12), 12,
-               juce::Justification::centredLeft, true);
+    // Overview lanes prioritise waveforms; only label the selected track.
+    const bool showName = trackSelected && getWidth() >= 100;
+    if (showName) {
+        g.setFont(TapeStyle::rowFont(34));
+        g.drawText(clip->getName(), 6, 0, juce::jmax(0, getWidth() - 12), 28,
+                   juce::Justification::centredLeft, true);
+    }
     const double speed = wave->getSpeedRatio();
     const double start = position.getOffset().inSeconds() * speed;
     const double end = start + position.getLength().inSeconds() * speed;
     if (end > start) {
         g.setColour(colour);
         auto waveform = getLocalBounds().reduced(3);
-        waveform.removeFromTop(12);
+        if (showName)
+            waveform.removeFromTop(26);
         thumbnail.drawChannels(g, waveform, start, end, 1.0f);
     }
 }

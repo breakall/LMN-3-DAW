@@ -60,20 +60,12 @@ void TapeDeckComponent::drawReel(juce::Graphics &g, juce::Point<float> centre,
 void TapeDeckComponent::paint(juce::Graphics &g) {
     const float width = static_cast<float>(getWidth());
     const float height = static_cast<float>(getHeight());
-    const float radius = juce::jmin(height * .31f, width * .075f);
-    const juce::Point<float> left(width * .16f, height * .59f);
-    const juce::Point<float> right(width * .38f, height * .59f);
+    const float radius = juce::jmin(height * .32f, width * .09f);
+    const juce::Point<float> left(width * .055f, height * .45f);
+    const juce::Point<float> right(width * .17f, height * .45f);
     const auto accent = recording ? TapeStyle::red : TapeStyle::green;
 
-    g.setFont(TapeStyle::mono(12));
-    g.setColour(TapeStyle::ink);
-    g.drawText("LMN / TAPE", 0, 0, getWidth() / 2, 20,
-               juce::Justification::left);
-    g.setColour(TapeStyle::muted);
-    g.drawText("SOUND ON TAPE", getWidth() / 2, 0, getWidth() / 2, 20,
-               juce::Justification::right);
-
-    const float guideY = height - 12;
+    const float guideY = height - 16;
     juce::Path tape;
     tape.startNewSubPath(left.x - radius * .72f, left.y + radius * .52f);
     tape.lineTo(left.x - radius * .28f, guideY);
@@ -93,29 +85,24 @@ void TapeDeckComponent::paint(juce::Graphics &g) {
     drawReel(g, left, radius, angle, .91f - transferred * .26f);
     drawReel(g, right, radius, angle * 1.13f, .65f + transferred * .26f);
 
-    const int textX = juce::roundToInt(width * .55f);
-    const int textWidth = getWidth() - textX;
-    const int statusY = juce::roundToInt(height * .26f);
-    g.setColour(playing || recording ? accent : TapeStyle::muted);
-    g.fillEllipse(static_cast<float>(textX), static_cast<float>(statusY + 5), 6,
-                  6);
-    g.setFont(TapeStyle::mono(11));
-    g.drawText(recording ? "RECORDING"
-               : playing ? "PLAYING"
-                         : "STOPPED",
-               textX + 15, statusY, textWidth - 15, 17,
-               juce::Justification::left);
+    const int textX = juce::roundToInt(width * .28f);
+    const int statusX = juce::roundToInt(width * .78f);
     g.setColour(TapeStyle::ink);
-    g.setFont(TapeStyle::mono(juce::jlimit(20.0f, 34.0f, width * .042f)));
-    g.drawText(TapeStyle::time(position), textX, statusY + 20, textWidth, 40,
-               juce::Justification::left);
-    g.setFont(TapeStyle::mono(11));
-    g.setColour(TapeStyle::muted);
-    g.drawText(trackName, textX, statusY + 64, textWidth, 18,
-               juce::Justification::left);
+    g.setFont(TapeStyle::rowFont(46));
+    g.drawText(trackName, textX, 0, getWidth() - textX, 36,
+               juce::Justification::centredLeft, true);
+    g.setFont(TapeStyle::rowFont(80));
+    g.drawText(TapeStyle::time(position), textX, 36, statusX - textX - 8, 60,
+               juce::Justification::centredLeft);
+    g.setColour(playing || recording ? accent : TapeStyle::muted);
+    g.setFont(TapeStyle::rowFont(34));
+    g.drawText(recording ? "Recording" : playing ? "Playing" : "Stopped",
+               statusX, 36, getWidth() - statusX, 30,
+               juce::Justification::centredLeft);
     if (clipboard.isNotEmpty()) {
         g.setColour(TapeStyle::orange);
-        g.drawText("LIFTED  " + clipboard, textX, statusY + 84, textWidth, 18,
-                   juce::Justification::left);
+        g.drawText("Lift " + clipboard.fromLastOccurrenceOf("/", false, false).trim(),
+                   statusX, 66, getWidth() - statusX, 30,
+                   juce::Justification::centredLeft, true);
     }
 }
