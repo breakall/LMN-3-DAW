@@ -1,0 +1,2 @@
+# Preserve dependency patch bytes, including CRLF context and patch whitespace.
+Tools/*.patch -text -whitespace
